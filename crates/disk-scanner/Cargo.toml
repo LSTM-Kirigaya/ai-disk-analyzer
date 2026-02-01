@@ -1,0 +1,12 @@
+[package]
+name = "ai-disk-scanner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ai-disk-common = { path = "../common" }
+ai-disk-domain = { path = "../domain-model" }
+rayon = "1"
+
+[dev-dependencies]
+tempfile = "3"

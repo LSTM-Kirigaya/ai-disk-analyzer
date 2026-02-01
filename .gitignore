@@ -1,0 +1,23 @@
+# Rust / Cargo
+/target/
+
+# Node
+node_modules/
+**/node_modules/
+
+# Tauri / 前端构建
+apps/desktop/frontend/dist/
+apps/desktop/src-tauri/gen/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志与临时
+*.log
+.env
+.env.local
+
+# IDE（可选，若需共享可删除）
+# .vscode/
+# .idea/

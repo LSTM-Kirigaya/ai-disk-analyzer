@@ -1,0 +1,23 @@
+[package]
+name = "ai-disk-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "AI Disk Analyzer - 智能磁盘分析工具"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+is_elevated = "0.1"
+
+# Workspace crates
+ai-disk-common = { path = "../../../crates/common" }
+ai-disk-domain = { path = "../../../crates/domain-model" }
+ai-disk-scanner = { path = "../../../crates/disk-scanner" }
+ai-disk-engine = { path = "../../../crates/ai-engine" }
+ai-disk-executor = { path = "../../../crates/executor" }
