@@ -2,8 +2,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Folder } from 'lucide-react'
-import { Button, TextField, Typography } from '@mui/material'
+import { Folder, Cpu, BarChart3, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive } from 'lucide-react'
+import { Button, TextField, Typography, Fade, Tooltip } from '@mui/material'
 import { Treemap, type TreemapNode } from './Treemap'
 import { formatBytes, formatDuration } from '../utils/format'
 import { loadSettings } from '../services/ai'
@@ -17,163 +17,121 @@ interface ScanResult {
 
 const PROMPT_INSTRUCTION_KEY = 'ai-disk-analyzer-prompt-instruction'
 
-/** 加载保存的提示词指令 */
 function loadPromptInstruction(): string {
     try {
         const stored = localStorage.getItem(PROMPT_INSTRUCTION_KEY)
         return stored || '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
-    } catch (e) {
-        console.error('Failed to load prompt instruction:', e)
-        return '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
-    }
+    } catch (e) { return '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。' }
 }
 
-/** 保存提示词指令 */
 function savePromptInstruction(instruction: string): void {
-    try {
-        localStorage.setItem(PROMPT_INSTRUCTION_KEY, instruction)
-    } catch (e) {
-        console.error('Failed to save prompt instruction:', e)
-    }
+    try { localStorage.setItem(PROMPT_INSTRUCTION_KEY, instruction) } catch (e) {}
 }
 
-/** AI PROMPT 视图：展示生成的 prompt 与复制按钮 */
+/** AI 提示面板 */
 function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPrompt: (r: ScanResult) => string }) {
     const fileListSummary = useMemo(() => buildPrompt(result), [result, buildPrompt])
     const [instruction, setInstruction] = useState(loadPromptInstruction())
+    const [copied, setCopied] = useState(false)
     
-    useEffect(() => {
-        savePromptInstruction(instruction)
-    }, [instruction])
-    
-    const fullPrompt = useMemo(() => {
-        return fileListSummary + '\n' + instruction
-    }, [fileListSummary, instruction])
+    useEffect(() => { savePromptInstruction(instruction) }, [instruction])
     
     const copy = useCallback(() => {
+        const fullPrompt = fileListSummary + '\n' + instruction
         void navigator.clipboard.writeText(fullPrompt).then(() => {
-            // 可在此加 Toast
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
         })
-    }, [fullPrompt])
+    }, [fileListSummary, instruction])
     
     return (
-        <div className="flex flex-col p-3 z-10 gap-3">
-            <div className="flex justify-end">
+        <div className="flex flex-col p-6 gap-6 bg-white dark:bg-gray-800 rounded-3xl h-full animate-in fade-in duration-500">
+            <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                        <MessageSquare size={20} />
+                    </div>
+                    <div>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'secondary.main' }}>AI 分析建议生成</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>数据流已就绪</Typography>
+                    </div>
+                </div>
                 <Button
                     onClick={copy}
                     variant="contained"
                     size="small"
+                    startIcon={copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
                     sx={{
-                        textTransform: 'none',
-                        fontSize: '12px',
-                        bgcolor: 'primary.main',
-                        color: 'secondary.main',
-                        fontWeight: 500,
-                        '&:hover': {
-                            bgcolor: 'primary.dark',
-                        },
+                        borderRadius: '10px', px: 3, py: 0.9, textTransform: 'none',
+                        bgcolor: copied ? '#4caf50' : 'primary.main', color: 'secondary.main',
+                        fontWeight: 700, fontSize: '12px', boxShadow: 'none',
+                        '&:hover': { bgcolor: copied ? '#45a049' : 'primary.dark' }
                     }}
                 >
-                    复制到剪贴板
+                    {copied ? '已复制' : '复制全文本'}
                 </Button>
             </div>
             
-            {/* 第一部分：文件列表摘要（只读） */}
-            <div className="flex flex-col gap-2">
-                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary', fontSize: '10px' }}>
-                    磁盘占用摘要
-                </Typography>
-                <pre className="flex-1 overflow-auto p-3 bg-surface border border-border rounded text-sm text-secondary whitespace-pre-wrap font-sans max-h-[300px]">
-                    {fileListSummary}
-                </pre>
-            </div>
-            
-            {/* 第二部分：用户可编辑的指令 */}
-            <div className="flex flex-col gap-2 flex-1 min-h-0">
-                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary', fontSize: '10px' }}>
-                    分析指令（可编辑）
-                </Typography>
-                <TextField
-                    multiline
-                    fullWidth
-                    value={instruction}
-                    onChange={(e) => setInstruction(e.target.value)}
-                    placeholder="请输入分析指令..."
-                    variant="outlined"
-                    size="small"
-                    sx={{
-                        flex: 1,
-                        '& .MuiInputBase-root': {
-                            fontSize: '14px',
-                            fontFamily: 'monospace',
-                        },
-                        '& .MuiInputBase-input': {
-                            minHeight: '100px',
-                        },
-                    }}
-                    InputProps={{
-                        sx: {
-                            height: '100%',
-                            alignItems: 'flex-start',
-                            '& textarea': {
-                                resize: 'none',
-                                overflow: 'auto !important',
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
+                <div className="flex flex-col gap-2">
+                    <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">磁盘占用摘要</span>
+                    <div className="bg-slate-50 dark:bg-gray-700/50 rounded-2xl p-4 border border-slate-100 dark:border-gray-600 flex-1 overflow-auto">
+                        <pre className="text-xs text-slate-600 dark:text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">{fileListSummary}</pre>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                    <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">分析指令定制</span>
+                    <TextField
+                        multiline fullWidth value={instruction}
+                        onChange={(e) => setInstruction(e.target.value)}
+                        placeholder="请输入分析指令..."
+                        sx={{
+                            flex: 1,
+                            '& .MuiInputBase-root': {
+                                height: '100%', borderRadius: '20px', bgcolor: '#fff', fontSize: '14px',
+                                '& fieldset': { borderColor: '#e2e8f0' },
                             },
-                        },
-                    }}
-                />
+                            '& textarea': { height: '100% !important' }
+                        }}
+                    />
+                </div>
             </div>
         </div>
     )
 }
 
-/** Windows 下 canonicalize 会带 \\?\ 前缀，摘要中显示为普通路径 */
 function displayPath(raw: string): string {
     return raw.replace(/^\\\\\?\\/, '')
 }
 
-/** 从扫描结果生成文件列表摘要（第一部分） */
-function buildFileListSummary(result: ScanResult, maxChars = 1600): string {
-    const nodes: { path: string; size: number }[] = []
+function formatModified(ts: number | undefined | null): string {
+    if (ts == null) return '-'
+    try {
+        const d = new Date(ts * 1000)
+        return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    } catch {
+        return '-'
+    }
+}
+
+function buildFileListSummary(result: ScanResult): string {
+    const nodes: { path: string; size: number; modified?: number | null }[] = []
     function collect(n: TreemapNode, depth: number) {
         if (depth > 2) return
-        // 只收集文件，不收集目录
-        if (!n.is_dir) {
-            nodes.push({ path: n.path || n.name, size: n.size })
-        }
-        if (n.children && n.children.length) {
-            const sorted = [...n.children].sort((a, b) => b.size - a.size)
-            sorted.slice(0, 12).forEach((c) => collect(c, depth + 1))
+        if (!n.is_dir) nodes.push({ path: n.path || n.name, size: n.size, modified: n.modified })
+        if (n.children?.length) {
+            [...n.children].sort((a, b) => b.size - a.size).slice(0, 10).forEach((c) => collect(c, depth + 1))
         }
     }
-    if (result.root.children?.length) {
-        const top = [...result.root.children].sort((a, b) => b.size - a.size).slice(0, 15)
-        top.forEach((c) => collect(c, 0))
-    } else if (!result.root.is_dir) {
-        nodes.push({ path: result.root.path || result.root.name, size: result.root.size })
-    }
-    const bySize = [...nodes].sort((a, b) => b.size - a.size).slice(0, 25)
-    const total = result.total_size || 1
-    const lines = bySize.map(({ path, size }) => `- ${displayPath(path)} (${formatBytes(size)}, ${(100 * size / total).toFixed(1)}%)`)
-    const header = `磁盘占用摘要（共 ${result.file_count} 项，${formatBytes(result.total_size)}）：\n`
-    const scanTime = new Date().toLocaleString('zh-CN', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit'
-    })
-    const timeInfo = `\n扫描时间：${scanTime}\n`
-    let out = header + lines.join('\n') + timeInfo
-    if (out.length > maxChars) {
-        out = header + lines.slice(0, Math.floor((maxChars - header.length - timeInfo.length) / 50)).join('\n') + timeInfo
-    }
-    return out
+    collect(result.root, 0)
+    const items = nodes.sort((a, b) => b.size - a.size).slice(0, 20)
+    const header = '| 路径 | 大小 | 最近修改时间 |\n| --- | --- | --- |\n'
+    const rows = items.map(n => `| ${displayPath(n.path)} | ${formatBytes(n.size)} | ${formatModified(n.modified)} |`).join('\n')
+    return `[磁盘分析结果]\n总大小: ${formatBytes(result.total_size)}，文件数: ${result.file_count}\n\n${header}${rows}`
 }
 
 export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) {
-    const [path, setPath] = useState('C:\\')
+    const [path, setPath] = useState('')
     const [status, setStatus] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
     const [errorMsg, setErrorMsg] = useState('')
     const [result, setResult] = useState<ScanResult | null>(null)
@@ -181,9 +139,10 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
     const [hoverNode, setHoverNode] = useState<TreemapNode | null>(null)
     const [progressFiles, setProgressFiles] = useState(0)
     const [viewMode, setViewMode] = useState<'disk' | 'ai-prompt'>('disk')
-    const [shallowDirs, setShallowDirs] = useState(true) // 遇到 node_modules/.git 等只计大小不递归，默认开
+    const [shallowDirs, setShallowDirs] = useState(true)
     const openedSettingsForStandardRef = useRef(false)
 
+    // 核心：权限检查
     const checkAdmin = useCallback(async () => {
         try {
             const ok = await invoke<boolean>('check_admin_permission')
@@ -196,354 +155,238 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
     }, [])
 
     useEffect(() => {
+        void checkAdmin()
         let unlisten: (() => void) | undefined
-        const win = getCurrentWindow()
-        win
-            .listen<[number, string]>('scan-progress', (e) => {
-                setProgressFiles(e.payload[0])
-            })
-            .then((fn) => {
-                unlisten = fn
-            })
-        return () => {
-            unlisten?.()
-        }
-    }, [])
+        getCurrentWindow().listen<[number, string]>('scan-progress', (e) => setProgressFiles(e.payload[0]))
+            .then((fn) => { unlisten = fn })
+        return () => unlisten?.()
+    }, [checkAdmin])
 
-    const runScan = useCallback(
-        async (targetPath: string) => {
-            setStatus('scanning')
-            setErrorMsg('')
-            setResult(null)
-            setProgressFiles(0)
-            // 不再在此处调用 checkAdmin()，避免覆盖用户选择的 标准/专家 模式
-            try {
-                const res = await invoke<ScanResult>('scan_path_command', {
-                    path: targetPath,
-                    shallow_dirs: shallowDirs,
-                })
-                setResult(res)
-                setStatus('done')
-                setProgressFiles(0)
-            } catch (e) {
-                setStatus('error')
-                const err = String(e)
-                setErrorMsg(
-                    err.includes('Permission') || err.includes('权限')
-                        ? '访问被拒绝。请以管理员身份运行后重试。'
-                        : err
-                )
-            }
-        },
-        [shallowDirs]
-    )
+    const runScan = useCallback(async (targetPath: string) => {
+        if (!targetPath) return
+        setStatus('scanning'); setErrorMsg(''); setResult(null); setProgressFiles(0);
+        try {
+            const res = await invoke<ScanResult>('scan_path_command', { path: targetPath, shallow_dirs: shallowDirs })
+            setResult(res); setStatus('done');
+        } catch (e) {
+            setStatus('error'); setErrorMsg(String(e));
+        }
+    }, [shallowDirs])
 
     const handleBrowseFolder = useCallback(async () => {
-        try {
-            const selected = await open({
-                directory: true,
-                multiple: false,
-                title: '选择要分析的文件夹',
-            })
-            if (selected) {
-                const pathStr = typeof selected === 'string' ? selected : selected[0] ?? ''
-                if (pathStr) {
-                    setPath(pathStr)
-                    await runScan(pathStr)
-                }
-            }
-        } catch (e) {
-            console.error('Folder picker error:', e)
+        const selected = await open({ directory: true, multiple: false });
+        if (selected) {
+            const pathStr = typeof selected === 'string' ? selected : selected[0];
+            setPath(pathStr); await runScan(pathStr);
         }
     }, [runScan])
 
-    const handleScan = async () => {
-        await runScan(path)
-    }
-
-    useEffect(() => {
-        const id = setTimeout(() => { void checkAdmin() }, 0)
-        return () => clearTimeout(id)
-    }, [checkAdmin])
-
-    // 标准模式下若未配置 API，则跳转到设置（仅自动打开一次）
-    useEffect(() => {
-        if (isAdmin === false && onOpenSettings && !openedSettingsForStandardRef.current) {
-            const s = loadSettings()
-            if (!s.apiKey?.trim()) {
-                openedSettingsForStandardRef.current = true
-                onOpenSettings()
-            }
-        }
-        if (isAdmin === true) openedSettingsForStandardRef.current = false
-    }, [isAdmin, onOpenSettings])
-
-    // 标准模式下未配置 API 时不允许扫描
+    // 核心：API 配置校验
     const standardModeNoApi = isAdmin === false && !loadSettings().apiKey?.trim()
 
+    useEffect(() => {
+        if (isAdmin === false && onOpenSettings && !openedSettingsForStandardRef.current && standardModeNoApi) {
+            openedSettingsForStandardRef.current = true
+            onOpenSettings()
+        }
+    }, [isAdmin, onOpenSettings, standardModeNoApi])
+
     return (
-        <div className="flex flex-col gap-5 text-text-main font-sans selection:bg-primary/30">
-          
-          {/* 扫描控制区 */}
-          <div className="flex flex-col gap-3">
-            {/* 主要操作区 */}
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={handleBrowseFolder}
-                disabled={standardModeNoApi}
-                variant="contained"
-                startIcon={<Folder className="w-4 h-4" />}
-                sx={{
-                  bgcolor: 'primary.main',
-                  color: 'secondary.main',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  textTransform: 'none',
-                  px: 3,
-                  py: 1.5,
-                  boxShadow: 2,
-                  '&:hover': {
-                    bgcolor: 'primary.dark',
-                    boxShadow: 3,
-                  },
-                  '&.Mui-disabled': {
-                    opacity: 0.5,
-                  },
-                }}
-              >
-                选择文件夹
-              </Button>
-              
-              <Button
-                onClick={handleScan}
-                disabled={status === 'scanning' || standardModeNoApi || !path}
-                variant="contained"
-                sx={{
-                  bgcolor: 'secondary.main',
-                  color: 'white',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  textTransform: 'none',
-                  px: 4,
-                  py: 1.5,
-                  boxShadow: 2,
-                  '&:hover': {
-                    bgcolor: '#0a0a0a',
-                    boxShadow: 3,
-                  },
-                  '&:active': {
-                    transform: 'scale(0.98)',
-                  },
-                  '&.Mui-disabled': {
-                    opacity: 0.5,
-                  },
-                }}
-              >
-                {status === 'scanning' ? '正在执行...' : '开始扫描'}
-              </Button>
+        <div className="flex-1 flex flex-col gap-6 p-2 min-h-0 text-slate-800 dark:text-gray-200 font-sans">
+            {/* 核心操作区 */}
+            <div className="space-y-3 shrink-0">
+                <div className="bg-white dark:bg-gray-800 px-4 py-3 rounded-2xl shadow-sm border border-slate-100 dark:border-gray-600 flex flex-wrap items-center gap-3">
+                    <div className="flex-1 min-w-[260px] relative">
+                        <Folder className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-400 pointer-events-none z-10" size={16} />
+                        <TextField
+                            fullWidth size="small" value={path}
+                            onChange={(e) => setPath(e.target.value)}
+                            placeholder="输入或选择路径开始分析..."
+                            sx={{
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: '12px', pl: '32px', fontSize: '13px',
+                                    bgcolor: (theme) => theme.palette.mode === 'dark' ? '#374151' : '#F3F4F6',
+                                    color: (theme) => theme.palette.mode === 'dark' ? '#f3f4f6' : 'inherit',
+                                    '& fieldset': { borderColor: 'transparent' },
+                                    '&.Mui-focused fieldset': { borderColor: 'primary.main' },
+                                    '&:hover': {
+                                      bgcolor: (theme) => theme.palette.mode === 'dark' ? '#4b5563' : undefined,
+                                    },
+                                    '& input::placeholder': { opacity: (theme) => theme.palette.mode === 'dark' ? 0.6 : 1, color: (theme) => theme.palette.mode === 'dark' ? '#9ca3af' : 'inherit' },
+                                }
+                            }}
+                        />
+                    </div>
+                    <div className="flex gap-1.5">
+                        <Button
+                            onClick={handleBrowseFolder}
+                            disabled={standardModeNoApi}
+                            variant="outlined"
+                            size="small"
+                            startIcon={<Folder size={14} />}
+                            sx={{ borderRadius: '10px', px: 2, py: 0.9, borderColor: '#D1D5DB', color: 'secondary.main', textTransform: 'none', fontWeight: 600, fontSize: '12px' }}
+                        >
+                            选择文件夹
+                        </Button>
+                        <Button
+                            onClick={() => runScan(path)}
+                            disabled={status === 'scanning' || standardModeNoApi || !path}
+                            variant="contained"
+                            size="small"
+                            sx={{
+                                borderRadius: '10px', px: 3, py: 0.9, bgcolor: 'primary.main', color: 'secondary.main',
+                                fontWeight: 700, fontSize: '12px', textTransform: 'none', boxShadow: 'none',
+                                '&:hover': { bgcolor: 'primary.dark' }
+                            }}
+                        >
+                            {status === 'scanning' ? '分析中...' : '开始扫描'}
+                        </Button>
+                    </div>
+                </div>
 
-              {/* 模式切换器 */}
-              <div 
-                onClick={() => setIsAdmin(!isAdmin)}
-                className="group flex items-center gap-0 cursor-pointer border border-border rounded overflow-hidden ml-auto"
-              >
-                <div className={`px-2.5 py-1 text-[10px] transition-all ${!isAdmin ? 'bg-secondary text-white' : 'text-muted hover:bg-surface'}`}>
-                  标准模式
+                {/* 搜索下方：左侧 group(checkbox + 标准/开发者) | 右侧 三个统计 */}
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-200/80 dark:border-gray-600 bg-slate-50/50 dark:bg-gray-700/30">
+                        <label className="flex items-center gap-2 cursor-pointer group w-fit select-none">
+                            <div className={`w-4 h-4 rounded border transition-all flex items-center justify-center ${shallowDirs ? 'bg-primary border-primary' : 'border-slate-300 dark:border-gray-500'}`}>
+                                {shallowDirs && <CheckCircle2 size={10} className="text-secondary" />}
+                            </div>
+                            <input type="checkbox" className="hidden" checked={shallowDirs} onChange={(e) => setShallowDirs(e.target.checked)} />
+                            <span className="text-[11px] font-medium text-slate-500 dark:text-gray-400 group-hover:text-secondary">对于 node_modules 等目录，只计大小不递归</span>
+                        </label>
+                        <div className="w-px h-5 bg-slate-200 dark:bg-gray-600 shrink-0" aria-hidden />
+                        <div className="bg-slate-200/50 dark:bg-gray-600/50 p-0.5 rounded-lg flex gap-0.5 border border-slate-200/80 dark:border-gray-600">
+                            <button
+                                onClick={() => setIsAdmin(false)}
+                                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${!isAdmin ? 'bg-white dark:bg-gray-600 text-secondary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}
+                            >
+                                标准模式
+                            </button>
+                            <button
+                                onClick={() => setIsAdmin(true)}
+                                className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${isAdmin ? 'bg-secondary text-primary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}
+                            >
+                                开发者模式
+                            </button>
+                        </div>
+                    </div>
+                    {result && (() => {
+                        const stats = [
+                            { label: '处理时耗', val: formatDuration(result.scan_time_ms), Icon: Clock },
+                            { label: '文件总计', val: result.file_count.toLocaleString(), Icon: FileStack },
+                            { label: '占用空间', val: formatBytes(result.total_size), Icon: HardDrive }
+                        ]
+                        const tooltipTitle = stats.map(({ label, val }) => `${label}: ${val}`).join(' · ')
+                        return (
+                            <Tooltip title={tooltipTitle} arrow placement="bottom">
+                                <div className="flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-200/80 dark:border-gray-600 bg-slate-50/50 dark:bg-gray-700/30 cursor-default">
+                                    {stats.map(({ label, val, Icon }, idx) => (
+                                        <span key={label} className="flex items-center gap-2">
+                                            {idx > 0 && <div className="w-px h-5 bg-slate-200 dark:bg-gray-600 shrink-0" aria-hidden />}
+                                            <Icon size={14} className="text-slate-400 dark:text-gray-400 shrink-0" />
+                                            <span className="text-[11px] font-semibold text-secondary tabular-nums">{val}</span>
+                                        </span>
+                                    ))}
+                                </div>
+                            </Tooltip>
+                        )
+                    })()}
                 </div>
-                <div className={`px-2.5 py-1 text-[10px] transition-all ${isAdmin ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}>
-                  专家模式
-                </div>
-              </div>
+
+                {/* 错误提示与 API 警告 */}
+                <Fade in={status === 'error' || standardModeNoApi}>
+                    <div className="space-y-2">
+                        {status === 'error' && (
+                            <div className="flex items-center gap-3 px-4 py-2.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl border border-red-100 dark:border-red-800 text-sm">
+                                <AlertCircle size={16} />
+                                <span className="font-medium">{errorMsg}</span>
+                            </div>
+                        )}
+                        {standardModeNoApi && (
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-xl border border-amber-100 dark:border-amber-800 text-sm">
+                                <div className="flex items-center gap-2">
+                                    <Settings size={16} />
+                                    <span className="font-medium">标准模式需先配置 API。</span>
+                                </div>
+                                <Button size="small" onClick={onOpenSettings} sx={{ fontWeight: 600, fontSize: '11px', color: 'inherit', textDecoration: 'underline', minWidth: 'auto', px: 1 }}>
+                                    去设置
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                </Fade>
             </div>
 
-            {/* 次要选项区 */}
-            <div className="flex items-center gap-4 text-xs text-muted">
-              {/* 路径输入（可选项，放在不起眼的位置） */}
-              <div className="flex items-center gap-2 flex-1 max-w-md">
-                <span className="text-[10px] text-muted/70 whitespace-nowrap">或手动输入路径：</span>
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  placeholder="输入路径..."
-                  variant="outlined"
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      fontSize: '12px',
-                      height: '28px',
-                      '& fieldset': {
-                        borderColor: 'divider',
-                      },
-                      '&:hover fieldset': {
-                        borderColor: 'text.secondary',
-                      },
-                    },
-                  }}
-                />
-              </div>
-
-              {/* node_modules 等只计大小不递归 */}
-              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-muted hover:text-secondary transition-colors">
-                <input
-                  type="checkbox"
-                  checked={shallowDirs}
-                  onChange={(e) => setShallowDirs(e.target.checked)}
-                  className="rounded border-border text-primary focus:ring-primary/30"
-                />
-                <span>node_modules 等只计大小不递归</span>
-              </label>
-            </div>
-            
-            {/* 专家模式状态指引 / 标准模式未配置 API 提示 */}
-            {!isAdmin && standardModeNoApi && (
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] text-muted bg-surface/80 rounded">
-                <span>标准模式需先配置 API 才能使用扫描。</span>
-                {onOpenSettings && (
-                  <Button
-                    onClick={onOpenSettings}
-                    variant="text"
-                    size="small"
-                    sx={{
-                      textTransform: 'none',
-                      fontSize: '10px',
-                      color: 'primary.main',
-                      fontWeight: 500,
-                      minWidth: 'auto',
-                      p: 0,
-                      '&:hover': {
-                        textDecoration: 'underline',
-                        bgcolor: 'transparent',
-                      },
-                    }}
-                  >
-                    去设置
-                  </Button>
-                )}
-              </div>
+            {/* 扫描中状态：脉动动画，无进度条 */}
+            {status === 'scanning' && (
+                <div className="p-10 flex flex-col items-center justify-center gap-4 animate-in zoom-in-95 duration-500">
+                    <div className="relative">
+                        <Cpu className="text-primary animate-pulse" size={48} />
+                        <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
+                    </div>
+                    <div className="text-center">
+                        <Typography variant="h4" sx={{ fontWeight: 900, color: 'secondary.main' }}>{progressFiles.toLocaleString()}</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>已处理文件对象</Typography>
+                    </div>
+                    <div className="flex gap-1 h-2">
+                        {Array.from({ length: 12 }).map((_, i) => (
+                            <div
+                                key={i}
+                                className="w-4 h-full bg-primary rounded-sm animate-pulse"
+                                style={{ animationDelay: `${i * 0.1}s`, animationDuration: '1.2s' }}
+                            />
+                        ))}
+                    </div>
+                </div>
             )}
-            {status === 'error' && errorMsg && (
-              <div className="px-3 py-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded" role="alert">
-                {errorMsg}
-              </div>
+
+            {/* 扫描结果展示 */}
+            {result && (
+                <div className="flex-1 flex flex-col gap-4 min-h-0 animate-in slide-in-from-bottom-8 duration-700">
+                    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-slate-100 dark:border-gray-600 overflow-hidden">
+                        <div className="px-3 py-2 flex items-center justify-between border-b border-slate-100 dark:border-gray-600 shrink-0">
+                            <div className="bg-slate-200/50 dark:bg-gray-600/50 p-0.5 rounded-lg flex gap-0.5 border border-slate-200/80 dark:border-gray-600">
+                                <button onClick={() => setViewMode('disk')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'disk' ? 'bg-white dark:bg-gray-600 text-secondary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>分布视窗</button>
+                                <button onClick={() => setViewMode('ai-prompt')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'ai-prompt' ? 'bg-secondary text-primary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>AI 指令集</button>
+                            </div>
+                            {hoverNode && viewMode === 'disk' && (
+                                <div className="px-3 py-1.5 bg-secondary text-primary rounded-lg text-[11px] font-semibold flex gap-2 items-center">
+                                    <span className="truncate max-w-[200px] text-white/90">{hoverNode.name}</span>
+                                    <span className="bg-primary/20 px-1.5 rounded text-[10px] shrink-0">{formatBytes(hoverNode.size)}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex-1 min-h-0 relative">
+                            {viewMode === 'disk' ? (
+                                <div className="absolute inset-0 p-4">
+                                    <Treemap root={result.root} width={1000} height={500} onHover={setHoverNode} />
+                                </div>
+                            ) : (
+                                <div className="absolute inset-0 overflow-auto">
+                                    <AIPromptPanel result={result} buildPrompt={buildFileListSummary} />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
-          </div>
-      
-          {/* 扫描进度：呼吸感分段进度 */}
-          {status === 'scanning' && (
-            <div className="bg-white p-4 border border-border rounded-lg relative shadow-sm">
-              <div className="flex justify-between items-end mb-4">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-muted tracking-tighter mb-1 uppercase">系统作业中...</span>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl text-secondary font-bold">{progressFiles.toLocaleString()}</span>
-                    <span className="text-xs text-muted">已处理对象</span>
-                  </div>
-                </div>
-                {/* 装饰性数据矩阵 */}
-                <div className="hidden md:flex gap-1 text-[8px] text-muted/40">
-                  <div>0101<br/>1100</div>
-                  <div>0011<br/>1010</div>
-                </div>
-              </div>
-              
-              <div className="flex gap-1 h-2 bg-surface rounded overflow-hidden">
-                {Array.from({ length: 24 }).map((_, i) => (
-                  <div key={i} className="flex-1 relative overflow-hidden">
-                    <div
-                      className="h-full w-full bg-primary animate-breath rounded-sm"
-                      style={{ animationDelay: `${i * 0.08}s` }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-      
-          {/* 指标矩阵 */}
-          {result && (
-            <div className="grid grid-cols-3 gap-0 border border-border bg-white rounded-lg overflow-hidden shadow-sm">
-              {[
-                { label: '作业时耗', val: formatDuration(result.scan_time_ms), icon: '⏱' },
-                { label: '扫描总数', val: result.file_count.toLocaleString(), icon: '📁' },
-                { label: '存储占用', val: formatBytes(result.total_size), icon: '💾' }
-              ].map((item, idx) => (
-                <div key={idx} className={`p-4 ${idx !== 2 ? 'border-r border-border' : ''}`}>
-                  <p className="text-[10px] text-muted mb-2 font-bold tracking-widest uppercase">{item.label}</p>
-                  <p className="text-xl text-secondary font-semibold">{item.val}</p>
-                </div>
-              ))}
-            </div>
-          )}
-      
-          {/* 空间占用映射区（专家模式：DISK / AI PROMPT 切换） */}
-          {result && (
-            <div className="min-h-[400px] flex flex-col bg-white border border-border rounded-lg relative shadow-sm">
-              <div className="flex justify-between items-center p-3 border-b border-border bg-surface/50 z-10 flex-wrap gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-1 h-4 bg-primary rounded shrink-0" />
-                  <span className="text-[10px] text-muted tracking-widest font-bold uppercase shrink-0">
-                    模式
-                  </span>
-                  {isAdmin && (
-                    <div 
-                      className="flex items-center gap-0 border border-border rounded overflow-hidden shrink-0 cursor-pointer"
+
+            {/* 空白页：仅图标+选择文件夹可点击，hover 仅作用于该区域 */}
+            {status === 'idle' && !result && (
+                <div className="flex-1 flex flex-col items-center justify-center min-h-0">
+                    <button
+                        type="button"
+                        onClick={handleBrowseFolder}
+                        disabled={standardModeNoApi}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-gray-600 bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 hover:border-primary/50 hover:bg-primary/5 hover:text-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     >
-                      <div 
-                        onClick={() => setViewMode('disk')}
-                        className={`px-2 py-0.5 text-[9px] transition-all ${viewMode === 'disk' ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}
-                      >
-                        DISK
-                      </div>
-                      <div 
-                        onClick={() => setViewMode('ai-prompt')}
-                        className={`px-2 py-0.5 text-[9px] transition-all ${viewMode === 'ai-prompt' ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}
-                      >
-                        AI PROMPT
-                      </div>
-                    </div>
-                  )}
+                        <Folder size={18} />
+                        <span className="text-sm font-medium">选择文件夹</span>
+                    </button>
+                    <p className="mt-2 text-xs text-slate-400 dark:text-gray-500">分析磁盘占用</p>
                 </div>
-                {/* 预留固定空间，避免悬停信息出现/消失时挤压行高和宽度 */}
-                <div className="h-7 min-w-[8rem] flex items-center justify-end shrink-0">
-                  {viewMode === 'disk' && hoverNode ? (
-                    <div className="flex gap-4 text-[11px] bg-secondary px-3 py-1.5 rounded text-white max-w-full truncate">
-                      <span className="text-primary font-medium truncate">{hoverNode.name}</span>
-                      <span className="text-white/70 shrink-0">{formatBytes(hoverNode.size)}</span>
-                    </div>
-                  ) : (
-                    <span className="invisible text-[11px] px-3 py-1.5" aria-hidden="true">0 B</span>
-                  )}
-                </div>
-              </div>
-
-              {viewMode === 'disk' && (
-                <div className="flex-1 p-3 z-10">
-                  <div className="w-full h-full transition-all duration-700">
-                    <Treemap
-                      root={result.root}
-                      width={800}
-                      height={400}
-                      onHover={setHoverNode}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {viewMode === 'ai-prompt' && result && (
-                <AIPromptPanel result={result} buildPrompt={buildFileListSummary} />
-              )}
-            </div>
-          )}
-      
-          {/* 空白状态引导 */}
-          {status === 'idle' && !result && (
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="text-sm text-muted mb-2">选择文件夹开始分析</div>
-              <div className="text-[10px] tracking-widest text-muted/60 uppercase">SYSTEM READY</div>
-              <div className="mt-4 w-32 h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent rounded"></div>
-            </div>
-          )}
+            )}
         </div>
-      );
+    );
 }

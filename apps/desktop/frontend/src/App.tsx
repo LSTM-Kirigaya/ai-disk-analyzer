@@ -1,35 +1,53 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-shell'
-import { Settings, Github, Mail, ExternalLink } from 'lucide-react'
+import { Settings, Github, Mail, ExternalLink, Sun, Moon } from 'lucide-react'
 import { ThemeProvider, createTheme, CssBaseline, Button, IconButton, Box, Tooltip } from '@mui/material'
 import { ExpertMode } from './components/ExpertMode'
 import { AISettings } from './components/AISettings'
 import { AIChat } from './components/AIChat'
 
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#FFD200',
-    },
-    secondary: {
-      main: '#1A1A1A',
-    },
-    background: {
-      default: '#FFFFFF',
-      paper: '#F5F5F5',
-    },
-  },
-  shape: {
-    borderRadius: 12,
-  },
-})
+const THEME_STORAGE_KEY = 'ai-disk-analyzer-theme'
 
 function App() {
   const win = getCurrentWindow()
   const [showSettings, setShowSettings] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [platform, setPlatform] = useState<'macos' | 'windows' | 'linux'>('windows')
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    try {
+      const stored = localStorage.getItem(THEME_STORAGE_KEY) as 'light' | 'dark' | null
+      return stored === 'dark' || stored === 'light' ? stored : 'light'
+    } catch {
+      return 'light'
+    }
+  })
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', themeMode === 'dark')
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themeMode)
+    } catch {}
+  }, [themeMode])
+
+  const theme = useMemo(() => createTheme({
+    palette: {
+      mode: themeMode,
+      primary: {
+        main: '#FFD200',
+      },
+      secondary: {
+        main: themeMode === 'dark' ? '#FFD200' : '#1A1A1A',
+      },
+      background: {
+        default: themeMode === 'dark' ? '#111827' : '#FFFFFF',
+        paper: themeMode === 'dark' ? '#1F2937' : '#F5F5F5',
+      },
+    },
+    shape: {
+      borderRadius: 12,
+    },
+  }), [themeMode])
 
   useEffect(() => {
     const detectPlatform = () => {
@@ -55,9 +73,9 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <div className="min-h-screen bg-white text-text-main flex flex-col overflow-hidden" style={{ height: '100vh' }}>
+      <div className={`min-h-screen flex flex-col overflow-hidden ${themeMode === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-text-main'}`} style={{ height: '100vh' }}>
       {/* 菜单栏固定顶部，向下滚动时始终可见 */}
-      <header className={`sticky top-0 z-50 shrink-0 h-10 flex items-center border-b border-border bg-white select-none ${platform === 'macos' ? 'pl-16' : ''}`}>
+      <header className={`sticky top-0 z-50 shrink-0 h-10 flex items-center border-b select-none ${themeMode === 'dark' ? 'border-gray-700 bg-gray-900' : 'border-border bg-white'} ${platform === 'macos' ? 'pl-16' : ''}`}>
         {/* macOS 窗口控制按钮（左上角） */}
         {platform === 'macos' && (
           <Box
@@ -149,11 +167,11 @@ function App() {
           onMouseDown={handleTitleBarMouseDown}
           className="flex-1 flex items-center px-4 h-full cursor-default"
         >
-          <span className="text-sm font-semibold text-secondary">AI Disk Analyzer</span>
+          <span className={`text-sm font-semibold ${themeMode === 'dark' ? 'text-gray-100' : 'text-secondary'}`}>AI Disk Analyzer</span>
         </div>
         
         {/* 项目信息链接 */}
-        <div className="flex items-center h-full px-2 gap-0.5 border-r border-border mr-1">
+        <div className={`flex items-center h-full px-2 gap-0.5 border-r mr-1 ${themeMode === 'dark' ? 'border-gray-700' : 'border-border'}`}>
           <Tooltip title="GitHub 仓库" arrow>
             <IconButton
               size="small"
@@ -228,6 +246,22 @@ function App() {
           >
             AI 助手
           </Button>
+          <Tooltip title={themeMode === 'dark' ? '浅色模式' : '深色模式'} arrow>
+            <IconButton
+              size="small"
+              onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+              sx={{
+                width: '28px',
+                height: '28px',
+                color: 'text.secondary',
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                },
+              }}
+            >
+              {themeMode === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </IconButton>
+          </Tooltip>
           <IconButton
             size="small"
             onClick={() => setShowSettings(true)}
@@ -247,7 +281,7 @@ function App() {
 
         {/* Windows/Linux 窗口控制按钮（右上角） */}
         {platform !== 'macos' && (
-          <div className="flex items-center border-l border-border gap-1 pr-1">
+          <div className={`flex items-center border-l gap-1 pr-1 ${themeMode === 'dark' ? 'border-gray-700' : 'border-border'}`}>
             <IconButton
               size="small"
               onClick={() => win.minimize()}
@@ -303,13 +337,13 @@ function App() {
 
       {/* 主内容区 */}
       <div className="flex-1 flex overflow-hidden">
-        <main className="flex-1 overflow-y-auto p-4 bg-surface">
+        <main className={`flex-1 flex flex-col min-h-0 overflow-y-auto p-4 ${themeMode === 'dark' ? 'bg-gray-800' : 'bg-surface'}`}>
           <ExpertMode onOpenSettings={() => setShowSettings(true)} />
         </main>
         
         {/* AI 聊天侧边栏 */}
         {showChat && (
-          <aside className="w-96 border-l border-border bg-white flex flex-col">
+          <aside className={`w-96 border-l flex flex-col ${themeMode === 'dark' ? 'border-gray-700 bg-gray-900' : 'border-border bg-white'}`}>
             <AIChat />
           </aside>
         )}

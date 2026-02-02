@@ -60,7 +60,7 @@ export function AISettings({ onClose }: Props) {
     }
   }, [])
 
-  // 当 API Key 和 URL 都填写后，自动获取模型列表
+  // 当 API Key 和 URL 都填写后，自动获取模型列表；加载完成后默认选中第一个模型
   useEffect(() => {
     const loadModels = async () => {
       if (settings.apiKey && settings.apiUrl) {
@@ -68,6 +68,11 @@ export function AISettings({ onClose }: Props) {
         try {
           const models = await fetchAvailableModels(settings.apiUrl, settings.apiKey)
           setAvailableModels(models)
+          if (models.length > 0) {
+            const sorted = [...models].sort((a, b) => a.id.localeCompare(b.id))
+            setSettings(s => ({ ...s, model: sorted[0].id }))
+            setCustomModel('')
+          }
         } catch (error) {
           console.error('Failed to load models:', error)
           setAvailableModels([])
@@ -87,7 +92,11 @@ export function AISettings({ onClose }: Props) {
   const handleSave = () => {
     saveSettings(settings)
     setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    // 保存成功后短暂显示「已保存」再自动关闭对话框
+    setTimeout(() => {
+      setSaved(false)
+      onClose()
+    }, 400)
   }
 
   const handleUrlChange = (value: string) => {
@@ -113,12 +122,12 @@ export function AISettings({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden flex flex-col border border-transparent dark:border-gray-600">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex items-center justify-between p-4 border-b border-border dark:border-gray-600">
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 bg-primary rounded"></div>
-            <h2 className="text-lg font-semibold text-secondary">AI 设置</h2>
+            <h2 className="text-lg font-semibold text-secondary dark:text-gray-100">AI 设置</h2>
           </div>
           <IconButton
             onClick={onClose}
@@ -135,7 +144,7 @@ export function AISettings({ onClose }: Props) {
         </div>
 
         {/* 内容区 */}
-        <div className="flex-1 overflow-auto p-4 space-y-5">
+        <div className="flex-1 overflow-auto p-4 space-y-5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
           {/* API URL */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
@@ -329,7 +338,7 @@ export function AISettings({ onClose }: Props) {
         </div>
 
         {/* 底部按钮 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }} className="dark:!bg-gray-700/50 dark:!border-gray-600">
           <Button
             onClick={() => {
               setSettings(DEFAULT_SETTINGS)
@@ -374,12 +383,17 @@ export function AISettings({ onClose }: Props) {
               startIcon={saved ? <Check className="w-4 h-4" /> : null}
               sx={{
                 textTransform: 'none',
-                fontSize: '14px',
-                fontWeight: 500,
+                fontSize: '12px',
+                fontWeight: 700,
+                borderRadius: '10px',
+                px: 3,
+                py: 0.9,
                 bgcolor: 'primary.main',
-                color: 'secondary.main',
+                color: '#1A1A1A',
+                boxShadow: 'none',
                 '&:hover': {
                   bgcolor: 'primary.dark',
+                  color: '#1A1A1A',
                 },
               }}
             >

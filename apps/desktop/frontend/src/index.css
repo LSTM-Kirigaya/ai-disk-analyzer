@@ -13,6 +13,15 @@ html {
   background: transparent;
 }
 
+html.dark {
+  background: #0f172a;
+}
+
+html.dark body {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
 body {
   @apply text-text-main antialiased font-sans;
   margin: 0;
@@ -28,6 +37,12 @@ body {
   background: white;
   border: 1px solid rgba(0, 0, 0, 0.12);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+html.dark #root {
+  background: #111827;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 /* 自定义滚动条 */
@@ -47,4 +62,17 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }

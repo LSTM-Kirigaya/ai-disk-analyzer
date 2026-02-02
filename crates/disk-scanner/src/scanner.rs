@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 
 use ai_disk_common::DiskAnalyzerError;
 use ai_disk_domain::{FileNode, ScanResult};
@@ -114,6 +114,12 @@ fn build_tree(
                     && SHALLOW_DIR_NAMES
                         .iter()
                         .any(|&s| s.eq_ignore_ascii_case(&child_name));
+                let entry_modified = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
                 if is_shallow_dir {
                     match dir_size_only(&child_path, counter, progress) {
                         Ok(size) => Ok((
@@ -122,6 +128,7 @@ fn build_tree(
                                 name: child_name,
                                 size,
                                 is_dir: true,
+                                modified: entry_modified,
                                 children: vec![],
                             },
                             1u64,
@@ -132,6 +139,7 @@ fn build_tree(
                                 name: format!("{} [无权限]", child_name),
                                 size: 0,
                                 is_dir: true,
+                                modified: None,
                                 children: vec![],
                             },
                             0u64,
@@ -154,6 +162,7 @@ fn build_tree(
                                 name: format!("{} [无权限]", child_name),
                                 size: 0,
                                 is_dir: child_path.is_dir(),
+                                modified: None,
                                 children: vec![],
                             },
                             0u64,
@@ -178,12 +187,18 @@ fn build_tree(
         }
     }
 
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
     Ok((
         FileNode {
             path: path.display().to_string(),
             name: name.to_string(),
             size,
             is_dir,
+            modified,
             children,
         },
         file_count,

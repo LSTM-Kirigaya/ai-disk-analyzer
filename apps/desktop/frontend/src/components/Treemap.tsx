@@ -5,6 +5,8 @@ export interface TreemapNode {
   path: string
   size: number
   is_dir?: boolean
+  /** Unix 时间戳（秒），最近修改时间 */
+  modified?: number | null
   children?: TreemapNode[]
 }
 
