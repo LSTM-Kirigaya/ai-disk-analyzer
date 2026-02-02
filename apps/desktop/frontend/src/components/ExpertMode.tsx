@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Folder } from 'lucide-react'
+import { Button, TextField, Typography } from '@mui/material'
 import { Treemap, type TreemapNode } from './Treemap'
 import { formatBytes, formatDuration } from '../utils/format'
 import { loadSettings } from '../services/ai'
@@ -14,28 +15,114 @@ interface ScanResult {
     total_size: number
 }
 
+const PROMPT_INSTRUCTION_KEY = 'ai-disk-analyzer-prompt-instruction'
+
+/** 加载保存的提示词指令 */
+function loadPromptInstruction(): string {
+    try {
+        const stored = localStorage.getItem(PROMPT_INSTRUCTION_KEY)
+        return stored || '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
+    } catch (e) {
+        console.error('Failed to load prompt instruction:', e)
+        return '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
+    }
+}
+
+/** 保存提示词指令 */
+function savePromptInstruction(instruction: string): void {
+    try {
+        localStorage.setItem(PROMPT_INSTRUCTION_KEY, instruction)
+    } catch (e) {
+        console.error('Failed to save prompt instruction:', e)
+    }
+}
+
 /** AI PROMPT 视图：展示生成的 prompt 与复制按钮 */
 function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPrompt: (r: ScanResult) => string }) {
-    const prompt = useMemo(() => buildPrompt(result), [result, buildPrompt])
+    const fileListSummary = useMemo(() => buildPrompt(result), [result, buildPrompt])
+    const [instruction, setInstruction] = useState(loadPromptInstruction())
+    
+    useEffect(() => {
+        savePromptInstruction(instruction)
+    }, [instruction])
+    
+    const fullPrompt = useMemo(() => {
+        return fileListSummary + '\n' + instruction
+    }, [fileListSummary, instruction])
+    
     const copy = useCallback(() => {
-        void navigator.clipboard.writeText(prompt).then(() => {
+        void navigator.clipboard.writeText(fullPrompt).then(() => {
             // 可在此加 Toast
         })
-    }, [prompt])
+    }, [fullPrompt])
+    
     return (
-        <div className="flex-1 flex flex-col p-3 z-10 min-h-0">
-            <div className="flex justify-end mb-2">
-                <button
-                    type="button"
+        <div className="flex flex-col p-3 z-10 gap-3">
+            <div className="flex justify-end">
+                <Button
                     onClick={copy}
-                    className="px-3 py-1.5 text-xs font-medium bg-primary text-secondary rounded hover:brightness-105 transition-colors"
+                    variant="contained"
+                    size="small"
+                    sx={{
+                        textTransform: 'none',
+                        fontSize: '12px',
+                        bgcolor: 'primary.main',
+                        color: 'secondary.main',
+                        fontWeight: 500,
+                        '&:hover': {
+                            bgcolor: 'primary.dark',
+                        },
+                    }}
                 >
                     复制到剪贴板
-                </button>
+                </Button>
             </div>
-            <pre className="flex-1 overflow-auto p-3 bg-surface border border-border rounded text-sm text-secondary whitespace-pre-wrap font-sans">
-                {prompt}
-            </pre>
+            
+            {/* 第一部分：文件列表摘要（只读） */}
+            <div className="flex flex-col gap-2">
+                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary', fontSize: '10px' }}>
+                    磁盘占用摘要
+                </Typography>
+                <pre className="flex-1 overflow-auto p-3 bg-surface border border-border rounded text-sm text-secondary whitespace-pre-wrap font-sans max-h-[300px]">
+                    {fileListSummary}
+                </pre>
+            </div>
+            
+            {/* 第二部分：用户可编辑的指令 */}
+            <div className="flex flex-col gap-2 flex-1 min-h-0">
+                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary', fontSize: '10px' }}>
+                    分析指令（可编辑）
+                </Typography>
+                <TextField
+                    multiline
+                    fullWidth
+                    value={instruction}
+                    onChange={(e) => setInstruction(e.target.value)}
+                    placeholder="请输入分析指令..."
+                    variant="outlined"
+                    size="small"
+                    sx={{
+                        flex: 1,
+                        '& .MuiInputBase-root': {
+                            fontSize: '14px',
+                            fontFamily: 'monospace',
+                        },
+                        '& .MuiInputBase-input': {
+                            minHeight: '100px',
+                        },
+                    }}
+                    InputProps={{
+                        sx: {
+                            height: '100%',
+                            alignItems: 'flex-start',
+                            '& textarea': {
+                                resize: 'none',
+                                overflow: 'auto !important',
+                            },
+                        },
+                    }}
+                />
+            </div>
         </div>
     )
 }
@@ -45,12 +132,15 @@ function displayPath(raw: string): string {
     return raw.replace(/^\\\\\?\\/, '')
 }
 
-/** 从扫描结果生成给大模型的简短 prompt，控制总长度 */
-function buildAIPrompt(result: ScanResult, maxChars = 1600): string {
+/** 从扫描结果生成文件列表摘要（第一部分） */
+function buildFileListSummary(result: ScanResult, maxChars = 1600): string {
     const nodes: { path: string; size: number }[] = []
     function collect(n: TreemapNode, depth: number) {
         if (depth > 2) return
-        nodes.push({ path: n.path || n.name, size: n.size })
+        // 只收集文件，不收集目录
+        if (!n.is_dir) {
+            nodes.push({ path: n.path || n.name, size: n.size })
+        }
         if (n.children && n.children.length) {
             const sorted = [...n.children].sort((a, b) => b.size - a.size)
             sorted.slice(0, 12).forEach((c) => collect(c, depth + 1))
@@ -59,16 +149,26 @@ function buildAIPrompt(result: ScanResult, maxChars = 1600): string {
     if (result.root.children?.length) {
         const top = [...result.root.children].sort((a, b) => b.size - a.size).slice(0, 15)
         top.forEach((c) => collect(c, 0))
-    } else {
+    } else if (!result.root.is_dir) {
         nodes.push({ path: result.root.path || result.root.name, size: result.root.size })
     }
     const bySize = [...nodes].sort((a, b) => b.size - a.size).slice(0, 25)
     const total = result.total_size || 1
     const lines = bySize.map(({ path, size }) => `- ${displayPath(path)} (${formatBytes(size)}, ${(100 * size / total).toFixed(1)}%)`)
     const header = `磁盘占用摘要（共 ${result.file_count} 项，${formatBytes(result.total_size)}）：\n`
-    const footer = `\n请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。`
-    let out = header + lines.join('\n') + footer
-    if (out.length > maxChars) out = out.slice(0, maxChars - 20) + '…\n' + footer
+    const scanTime = new Date().toLocaleString('zh-CN', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+    })
+    const timeInfo = `\n扫描时间：${scanTime}\n`
+    let out = header + lines.join('\n') + timeInfo
+    if (out.length > maxChars) {
+        out = header + lines.slice(0, Math.floor((maxChars - header.length - timeInfo.length) / 50)).join('\n') + timeInfo
+    }
     return out
 }
 
@@ -182,97 +282,146 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
     const standardModeNoApi = isAdmin === false && !loadSettings().apiKey?.trim()
 
     return (
-        <div className="flex flex-col h-full gap-5 text-text-main font-sans selection:bg-primary/30">
+        <div className="flex flex-col gap-5 text-text-main font-sans selection:bg-primary/30">
           
           {/* 扫描控制区 */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-stretch gap-0 bg-white border border-border rounded-lg shadow-sm">
-              {/* 动态状态条：黄色装饰 */}
-              <div className={`w-1.5 rounded-l-lg transition-all duration-500 ${isAdmin ? 'bg-primary' : 'bg-muted/30'}`}></div>
+          <div className="flex flex-col gap-3">
+            {/* 主要操作区 */}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleBrowseFolder}
+                disabled={standardModeNoApi}
+                variant="contained"
+                startIcon={<Folder className="w-4 h-4" />}
+                sx={{
+                  bgcolor: 'primary.main',
+                  color: 'secondary.main',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  textTransform: 'none',
+                  px: 3,
+                  py: 1.5,
+                  boxShadow: 2,
+                  '&:hover': {
+                    bgcolor: 'primary.dark',
+                    boxShadow: 3,
+                  },
+                  '&.Mui-disabled': {
+                    opacity: 0.5,
+                  },
+                }}
+              >
+                选择文件夹
+              </Button>
               
-              <div className="flex flex-1 items-center gap-4 p-3 pl-4">
-                {/* 路径选择与模式切换组 */}
-                <div className="flex flex-1 items-center gap-4">
-                  <button
-                    onClick={handleBrowseFolder}
-                    disabled={standardModeNoApi}
-                    className="group p-2 hover:bg-surface rounded transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={standardModeNoApi ? '请先在设置中配置 API' : '选择路径'}
-                  >
-                    <Folder className="w-5 h-5 text-primary" />
-                  </button>
-      
-                  <div className="flex-1 flex flex-col">
-                    <div className="flex items-center gap-3 mb-1 flex-wrap">
-                      <span className="text-[10px] text-muted tracking-widest font-bold uppercase">目标路径</span>
-                      
-                      {/* 模式切换器 */}
-                      <div 
-                        onClick={() => setIsAdmin(!isAdmin)}
-                        className="group flex items-center gap-0 cursor-pointer border border-border rounded overflow-hidden"
-                      >
-                        <div className={`px-2 py-0.5 text-[9px] transition-all ${!isAdmin ? 'bg-secondary text-white' : 'text-muted hover:bg-surface'}`}>
-                          标准模式
-                        </div>
-                        <div className={`px-2 py-0.5 text-[9px] transition-all ${isAdmin ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}>
-                          专家模式
-                        </div>
-                      </div>
+              <Button
+                onClick={handleScan}
+                disabled={status === 'scanning' || standardModeNoApi || !path}
+                variant="contained"
+                sx={{
+                  bgcolor: 'secondary.main',
+                  color: 'white',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  textTransform: 'none',
+                  px: 4,
+                  py: 1.5,
+                  boxShadow: 2,
+                  '&:hover': {
+                    bgcolor: '#0a0a0a',
+                    boxShadow: 3,
+                  },
+                  '&:active': {
+                    transform: 'scale(0.98)',
+                  },
+                  '&.Mui-disabled': {
+                    opacity: 0.5,
+                  },
+                }}
+              >
+                {status === 'scanning' ? '正在执行...' : '开始扫描'}
+              </Button>
 
-                      {/* node_modules 等只计大小不递归 */}
-                      <label className="flex items-center gap-1.5 cursor-pointer select-none text-[10px] text-muted hover:text-secondary transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={shallowDirs}
-                          onChange={(e) => setShallowDirs(e.target.checked)}
-                          className="rounded border-border text-primary focus:ring-primary/30"
-                        />
-                        <span>node_modules 等只计大小不递归</span>
-                      </label>
-                    </div>
-                    
-                    <input
-                      type="text"
-                      value={path}
-                      onChange={(e) => setPath(e.target.value)}
-                      placeholder="请选择或输入扫描路径..."
-                      className="bg-transparent border-none p-0 text-sm text-secondary focus:ring-0 placeholder:text-muted/60"
-                    />
-                  </div>
+              {/* 模式切换器 */}
+              <div 
+                onClick={() => setIsAdmin(!isAdmin)}
+                className="group flex items-center gap-0 cursor-pointer border border-border rounded overflow-hidden ml-auto"
+              >
+                <div className={`px-2.5 py-1 text-[10px] transition-all ${!isAdmin ? 'bg-secondary text-white' : 'text-muted hover:bg-surface'}`}>
+                  标准模式
                 </div>
-      
-                <button
-                  onClick={handleScan}
-                  disabled={status === 'scanning' || standardModeNoApi}
-                  className="relative h-full px-8 py-2 bg-primary text-secondary font-bold text-sm rounded hover:brightness-105 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                >
-                  {status === 'scanning' ? '正在执行' : '开始扫描'}
-                </button>
+                <div className={`px-2.5 py-1 text-[10px] transition-all ${isAdmin ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}>
+                  专家模式
+                </div>
               </div>
+            </div>
+
+            {/* 次要选项区 */}
+            <div className="flex items-center gap-4 text-xs text-muted">
+              {/* 路径输入（可选项，放在不起眼的位置） */}
+              <div className="flex items-center gap-2 flex-1 max-w-md">
+                <span className="text-[10px] text-muted/70 whitespace-nowrap">或手动输入路径：</span>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  placeholder="输入路径..."
+                  variant="outlined"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      fontSize: '12px',
+                      height: '28px',
+                      '& fieldset': {
+                        borderColor: 'divider',
+                      },
+                      '&:hover fieldset': {
+                        borderColor: 'text.secondary',
+                      },
+                    },
+                  }}
+                />
+              </div>
+
+              {/* node_modules 等只计大小不递归 */}
+              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-muted hover:text-secondary transition-colors">
+                <input
+                  type="checkbox"
+                  checked={shallowDirs}
+                  onChange={(e) => setShallowDirs(e.target.checked)}
+                  className="rounded border-border text-primary focus:ring-primary/30"
+                />
+                <span>node_modules 等只计大小不递归</span>
+              </label>
             </div>
             
             {/* 专家模式状态指引 / 标准模式未配置 API 提示 */}
-            <div className="overflow-hidden">
-              {isAdmin ? (
-                <div className="flex items-center gap-2 px-3 transition-all duration-500">
-                  <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                  <span className="text-[10px] text-secondary/70 tracking-wide">已激活专家特权：支持深层目录穿透与受限文件检索</span>
-                </div>
-              ) : standardModeNoApi ? (
-                <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] text-muted bg-surface/80 rounded">
-                  <span>标准模式需先配置 API 才能使用扫描。</span>
-                  {onOpenSettings && (
-                    <button
-                      type="button"
-                      onClick={onOpenSettings}
-                      className="text-primary font-medium hover:underline"
-                    >
-                      去设置
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
+            {!isAdmin && standardModeNoApi && (
+              <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] text-muted bg-surface/80 rounded">
+                <span>标准模式需先配置 API 才能使用扫描。</span>
+                {onOpenSettings && (
+                  <Button
+                    onClick={onOpenSettings}
+                    variant="text"
+                    size="small"
+                    sx={{
+                      textTransform: 'none',
+                      fontSize: '10px',
+                      color: 'primary.main',
+                      fontWeight: 500,
+                      minWidth: 'auto',
+                      p: 0,
+                      '&:hover': {
+                        textDecoration: 'underline',
+                        bgcolor: 'transparent',
+                      },
+                    }}
+                  >
+                    去设置
+                  </Button>
+                )}
+              </div>
+            )}
             {status === 'error' && errorMsg && (
               <div className="px-3 py-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded" role="alert">
                 {errorMsg}
@@ -329,45 +478,43 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
       
           {/* 空间占用映射区（专家模式：DISK / AI PROMPT 切换） */}
           {result && (
-            <div className="flex-1 min-h-[400px] flex flex-col bg-white border border-border rounded-lg overflow-hidden relative shadow-sm">
+            <div className="min-h-[400px] flex flex-col bg-white border border-border rounded-lg relative shadow-sm">
               <div className="flex justify-between items-center p-3 border-b border-border bg-surface/50 z-10 flex-wrap gap-2">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-1 h-4 bg-primary rounded shrink-0" />
                   <span className="text-[10px] text-muted tracking-widest font-bold uppercase shrink-0">
-                    {viewMode === 'disk' ? '存储空间映射结构' : 'AI 分析摘要'}
+                    模式
                   </span>
                   {isAdmin && (
-                    <div className="flex items-center gap-0 border border-border rounded overflow-hidden shrink-0">
-                      <button
-                        type="button"
+                    <div 
+                      className="flex items-center gap-0 border border-border rounded overflow-hidden shrink-0 cursor-pointer"
+                    >
+                      <div 
                         onClick={() => setViewMode('disk')}
-                        className={`px-2 py-1 text-[10px] font-medium transition-colors ${viewMode === 'disk' ? 'bg-primary text-secondary' : 'text-muted hover:bg-surface'}`}
+                        className={`px-2 py-0.5 text-[9px] transition-all ${viewMode === 'disk' ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}
                       >
                         DISK
-                      </button>
-                      <button
-                        type="button"
+                      </div>
+                      <div 
                         onClick={() => setViewMode('ai-prompt')}
-                        className={`px-2 py-1 text-[10px] font-medium transition-colors ${viewMode === 'ai-prompt' ? 'bg-primary text-secondary' : 'text-muted hover:bg-surface'}`}
+                        className={`px-2 py-0.5 text-[9px] transition-all ${viewMode === 'ai-prompt' ? 'bg-primary text-secondary font-bold' : 'text-muted hover:bg-surface'}`}
                       >
                         AI PROMPT
-                      </button>
+                      </div>
                     </div>
                   )}
                 </div>
                 {/* 预留固定空间，避免悬停信息出现/消失时挤压行高和宽度 */}
-                {viewMode === 'disk' && (
-                  <div className="h-7 min-w-[8rem] flex items-center justify-end shrink-0">
-                    {hoverNode ? (
-                      <div className="flex gap-4 text-[11px] bg-secondary px-3 py-1.5 rounded text-white max-w-full truncate">
-                        <span className="text-primary font-medium truncate">{hoverNode.name}</span>
-                        <span className="text-white/70 shrink-0">{formatBytes(hoverNode.size)}</span>
-                      </div>
-                    ) : (
-                      <span className="invisible text-[11px] px-3 py-1.5" aria-hidden="true">0 B</span>
-                    )}
-                  </div>
-                )}
+                <div className="h-7 min-w-[8rem] flex items-center justify-end shrink-0">
+                  {viewMode === 'disk' && hoverNode ? (
+                    <div className="flex gap-4 text-[11px] bg-secondary px-3 py-1.5 rounded text-white max-w-full truncate">
+                      <span className="text-primary font-medium truncate">{hoverNode.name}</span>
+                      <span className="text-white/70 shrink-0">{formatBytes(hoverNode.size)}</span>
+                    </div>
+                  ) : (
+                    <span className="invisible text-[11px] px-3 py-1.5" aria-hidden="true">0 B</span>
+                  )}
+                </div>
               </div>
 
               {viewMode === 'disk' && (
@@ -384,7 +531,7 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
               )}
 
               {viewMode === 'ai-prompt' && result && (
-                <AIPromptPanel result={result} buildPrompt={buildAIPrompt} />
+                <AIPromptPanel result={result} buildPrompt={buildFileListSummary} />
               )}
             </div>
           )}

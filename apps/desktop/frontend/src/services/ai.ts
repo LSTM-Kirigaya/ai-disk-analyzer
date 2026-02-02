@@ -173,6 +173,54 @@ export async function sendChatRequest(
   return data.choices[0]?.message?.content || ''
 }
 
+// 获取可用模型列表
+export interface ModelInfo {
+  id: string
+  object: string
+  created: number
+  owned_by: string
+}
+
+export interface ModelsListResponse {
+  object: string
+  data: ModelInfo[]
+}
+
+export async function fetchAvailableModels(apiUrl: string, apiKey: string): Promise<ModelInfo[]> {
+  if (!apiKey || !apiUrl) {
+    return []
+  }
+
+  try {
+    const url = `${apiUrl.replace(/\/$/, '')}/models`
+    
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${apiKey}`,
+    }
+
+    // Anthropic 不支持 models 端点，返回空数组
+    if (apiUrl.includes('anthropic')) {
+      return []
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    })
+
+    if (!response.ok) {
+      console.error('Failed to fetch models:', response.status, response.statusText)
+      return []
+    }
+
+    const data = await response.json() as ModelsListResponse
+    return data.data || []
+  } catch (error) {
+    console.error('Error fetching models:', error)
+    return []
+  }
+}
+
 // 系统提示词
 export const SYSTEM_PROMPT = `你是一个专业的磁盘分析和文件管理助手。你可以帮助用户：
 

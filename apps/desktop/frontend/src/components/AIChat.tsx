@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Send, Loader2, Trash2, AlertCircle } from 'lucide-react'
+import { Button, IconButton, TextField, Alert, Box } from '@mui/material'
 import {
   loadSettings,
   sendChatRequest,
@@ -20,7 +21,7 @@ export function AIChat() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const textareaRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -33,8 +34,11 @@ export function AIChat() {
   // 自动调整输入框高度
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+      const textarea = textareaRef.current.querySelector('textarea') as HTMLTextAreaElement
+      if (textarea) {
+        textarea.style.height = 'auto'
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
+      }
     }
   }, [input])
 
@@ -125,13 +129,20 @@ export function AIChat() {
           <span className="text-sm font-semibold text-secondary">AI 助手</span>
         </div>
         {messages.length > 0 && (
-          <button
+          <IconButton
             onClick={clearMessages}
-            className="p-1.5 text-muted hover:text-secondary hover:bg-surface rounded transition-colors"
+            size="small"
             title="清空对话"
+            sx={{
+              color: 'text.secondary',
+              '&:hover': {
+                bgcolor: 'action.hover',
+                color: 'text.primary',
+              },
+            }}
           >
             <Trash2 className="w-4 h-4" />
-          </button>
+          </IconButton>
         )}
       </div>
 
@@ -171,41 +182,73 @@ export function AIChat() {
 
       {/* 错误提示 */}
       {error && (
-        <div className="mx-3 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{error}</span>
-        </div>
+        <Box sx={{ mx: 1.5, mb: 1 }}>
+          <Alert severity="error" icon={<AlertCircle className="w-4 h-4" />} sx={{ fontSize: '14px' }}>
+            {error}
+          </Alert>
+        </Box>
       )}
 
       {/* 输入区 */}
-      <div className="p-3 border-t border-border">
-        <div className="flex items-end gap-2 bg-surface rounded-lg border border-border p-2">
-          <textarea
-            ref={textareaRef}
+      <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
+        <Box ref={textareaRef} sx={{ display: 'flex', alignItems: 'flex-end', gap: 1, bgcolor: 'action.hover', borderRadius: 1, border: 1, borderColor: 'divider', p: 1 }}>
+          <TextField
+            multiline
+            fullWidth
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入消息，按 Enter 发送..."
-            rows={1}
-            className="flex-1 bg-transparent resize-none text-sm text-secondary placeholder:text-muted/60 focus:outline-none"
             disabled={isLoading}
+            variant="standard"
+            InputProps={{
+              disableUnderline: true,
+              sx: {
+                fontSize: '14px',
+                color: 'text.primary',
+                '&::placeholder': {
+                  color: 'text.secondary',
+                  opacity: 0.6,
+                },
+                '& textarea': {
+                  resize: 'none',
+                  maxHeight: '120px',
+                },
+              },
+            }}
+            sx={{
+              '& .MuiInputBase-root': {
+                bgcolor: 'transparent',
+              },
+            }}
           />
-          <button
+          <IconButton
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
-            className="shrink-0 p-2 bg-primary text-secondary rounded-lg hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            sx={{
+              bgcolor: 'primary.main',
+              color: 'secondary.main',
+              flexShrink: 0,
+              '&:hover': {
+                bgcolor: 'primary.dark',
+              },
+              '&.Mui-disabled': {
+                opacity: 0.5,
+                bgcolor: 'primary.main',
+              },
+            }}
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Send className="w-4 h-4" />
             )}
-          </button>
-        </div>
-        <p className="text-[10px] text-muted mt-1.5 text-center">
+          </IconButton>
+        </Box>
+        <Box component="p" sx={{ fontSize: '10px', color: 'text.secondary', mt: 1.5, textAlign: 'center', m: 0 }}>
           Shift + Enter 换行 · Enter 发送
-        </p>
-      </div>
+        </Box>
+      </Box>
     </div>
   )
 }

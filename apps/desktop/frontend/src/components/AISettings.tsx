@@ -1,12 +1,32 @@
 import { useState, useEffect } from 'react'
-import { X, Eye, EyeOff, Check, AlertCircle } from 'lucide-react'
+import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  TextField,
+  Select,
+  MenuItem,
+  Button,
+  IconButton,
+  InputAdornment,
+  FormControl,
+  InputLabel,
+  FormHelperText,
+  Box,
+  Typography,
+  Slider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  CircularProgress,
+} from '@mui/material'
 import {
   loadSettings,
   saveSettings,
   DEFAULT_SETTINGS,
   MODEL_PRESETS,
   API_URL_PRESETS,
+  fetchAvailableModels,
   type AISettings as AISettingsType,
+  type ModelInfo,
 } from '../services/ai'
 
 interface Props {
@@ -19,6 +39,9 @@ export function AISettings({ onClose }: Props) {
   const [saved, setSaved] = useState(false)
   const [customUrl, setCustomUrl] = useState('')
   const [customModel, setCustomModel] = useState('')
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [advancedExpanded, setAdvancedExpanded] = useState(false)
 
   useEffect(() => {
     const loaded = loadSettings()
@@ -36,6 +59,30 @@ export function AISettings({ onClose }: Props) {
       setCustomModel(loaded.model)
     }
   }, [])
+
+  // 当 API Key 和 URL 都填写后，自动获取模型列表
+  useEffect(() => {
+    const loadModels = async () => {
+      if (settings.apiKey && settings.apiUrl) {
+        setLoadingModels(true)
+        try {
+          const models = await fetchAvailableModels(settings.apiUrl, settings.apiKey)
+          setAvailableModels(models)
+        } catch (error) {
+          console.error('Failed to load models:', error)
+          setAvailableModels([])
+        } finally {
+          setLoadingModels(false)
+        }
+      } else {
+        setAvailableModels([])
+      }
+    }
+
+    // 延迟加载，避免频繁请求
+    const timer = setTimeout(loadModels, 500)
+    return () => clearTimeout(timer)
+  }, [settings.apiKey, settings.apiUrl])
 
   const handleSave = () => {
     saveSettings(settings)
@@ -73,177 +120,273 @@ export function AISettings({ onClose }: Props) {
             <div className="w-1 h-5 bg-primary rounded"></div>
             <h2 className="text-lg font-semibold text-secondary">AI 设置</h2>
           </div>
-          <button
+          <IconButton
             onClick={onClose}
-            className="p-1.5 text-muted hover:text-secondary hover:bg-surface rounded transition-colors"
+            size="small"
+            sx={{
+              color: 'text.secondary',
+              '&:hover': {
+                bgcolor: 'action.hover',
+              },
+            }}
           >
             <X className="w-5 h-5" />
-          </button>
+          </IconButton>
         </div>
 
         {/* 内容区 */}
         <div className="flex-1 overflow-auto p-4 space-y-5">
           {/* API URL */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-muted uppercase tracking-wider">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
               API 地址
-            </label>
-            <select
-              value={isCustomUrl ? 'custom' : settings.apiUrl}
-              onChange={(e) => handleUrlChange(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded bg-white text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {API_URL_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.label}
-                </option>
-              ))}
-            </select>
+            </Typography>
+            <FormControl fullWidth size="small">
+              <Select
+                value={isCustomUrl ? 'custom' : settings.apiUrl}
+                onChange={(e) => handleUrlChange(e.target.value)}
+                sx={{ fontSize: '14px' }}
+              >
+                {API_URL_PRESETS.map((preset) => (
+                  <MenuItem key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             {isCustomUrl && (
-              <input
-                type="text"
+              <TextField
+                fullWidth
+                size="small"
                 value={settings.apiUrl}
                 onChange={(e) => setSettings(s => ({ ...s, apiUrl: e.target.value }))}
                 placeholder="输入自定义 API URL..."
-                className="w-full px-3 py-2 border border-border rounded bg-surface text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                sx={{ fontSize: '14px' }}
               />
             )}
-          </div>
+          </Box>
 
           {/* API Key */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-muted uppercase tracking-wider">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
               API Key
-            </label>
-            <div className="relative">
-              <input
-                type={showApiKey ? 'text' : 'password'}
-                value={settings.apiKey}
-                onChange={(e) => setSettings(s => ({ ...s, apiKey: e.target.value }))}
-                placeholder="输入您的 API Key..."
-                className="w-full px-3 py-2 pr-10 border border-border rounded bg-white text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-secondary"
-              >
-                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-[10px] text-muted flex items-center gap-1">
+            </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              type={showApiKey ? 'text' : 'password'}
+              value={settings.apiKey}
+              onChange={(e) => setSettings(s => ({ ...s, apiKey: e.target.value }))}
+              placeholder="输入您的 API Key..."
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      edge="end"
+                      size="small"
+                      sx={{ color: 'text.secondary' }}
+                    >
+                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ fontSize: '14px' }}
+            />
+            <FormHelperText sx={{ fontSize: '10px', display: 'flex', alignItems: 'center', gap: 0.5, m: 0 }}>
               <AlertCircle className="w-3 h-3" />
               API Key 仅保存在本地，不会上传到任何服务器
-            </p>
-          </div>
+            </FormHelperText>
+          </Box>
 
-          {/* 模型选择 */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-muted uppercase tracking-wider">
-              模型
-            </label>
-            <select
-              value={isCustomModel ? 'custom' : settings.model}
-              onChange={(e) => handleModelChange(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded bg-white text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          {/* 模型选择 - 只有填写了 API Key 才显示 */}
+          {settings.apiKey && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                模型
+              </Typography>
+              {loadingModels ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
+                  <CircularProgress size={16} />
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '12px' }}>
+                    正在加载可用模型...
+                  </Typography>
+                </Box>
+              ) : (
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={isCustomModel ? 'custom' : settings.model}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    sx={{ fontSize: '14px' }}
+                  >
+                    {/* 显示从 API 获取的模型 */}
+                    {availableModels.length > 0 ? (
+                      availableModels
+                        .sort((a, b) => a.id.localeCompare(b.id))
+                        .map((model) => (
+                          <MenuItem key={model.id} value={model.id}>
+                            {model.id}
+                          </MenuItem>
+                        ))
+                    ) : (
+                      // 如果没有获取到模型，显示预设模型
+                      MODEL_PRESETS.map((preset) => (
+                        <MenuItem key={preset.value} value={preset.value}>
+                          {preset.provider ? `${preset.label} (${preset.provider})` : preset.label}
+                        </MenuItem>
+                      ))
+                    )}
+                    <MenuItem value="custom">自定义</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+              {isCustomModel && (
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={settings.model}
+                  onChange={(e) => setSettings(s => ({ ...s, model: e.target.value }))}
+                  placeholder="输入自定义模型名称..."
+                  sx={{ fontSize: '14px' }}
+                />
+              )}
+            </Box>
+          )}
+
+          {/* 高级设置 - 使用 Accordion 实现折叠 */}
+          <Accordion
+            expanded={advancedExpanded}
+            onChange={(_, expanded) => setAdvancedExpanded(expanded)}
+            sx={{
+              boxShadow: 'none',
+              border: '1px solid',
+              borderColor: 'divider',
+              '&:before': {
+                display: 'none',
+              },
+            }}
+          >
+            <AccordionSummary
+              expandIcon={advancedExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              sx={{
+                minHeight: 40,
+                '& .MuiAccordionSummary-content': {
+                  my: 1,
+                },
+              }}
             >
-              {MODEL_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.provider ? `${preset.label} (${preset.provider})` : preset.label}
-                </option>
-              ))}
-            </select>
-            {isCustomModel && (
-              <input
-                type="text"
-                value={settings.model}
-                onChange={(e) => setSettings(s => ({ ...s, model: e.target.value }))}
-                placeholder="输入自定义模型名称..."
-                className="w-full px-3 py-2 border border-border rounded bg-surface text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            )}
-          </div>
+              <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                高级设置
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ pt: 0, pb: 2 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {/* Temperature */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: 'text.primary' }}>温度 (Temperature)</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+                      {settings.temperature.toFixed(1)}
+                    </Typography>
+                  </Box>
+                  <Slider
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={settings.temperature}
+                    onChange={(_, value) => setSettings(s => ({ ...s, temperature: value as number }))}
+                    sx={{ color: 'primary.main' }}
+                  />
+                  <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
+                    较低的值使输出更确定，较高的值使输出更有创意
+                  </FormHelperText>
+                </Box>
 
-          {/* 高级设置 */}
-          <div className="space-y-4 pt-2 border-t border-border">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wider">高级设置</p>
-            
-            {/* Temperature */}
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <label className="text-sm text-secondary">温度 (Temperature)</label>
-                <span className="text-sm text-muted tabular-nums">{settings.temperature.toFixed(1)}</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                value={settings.temperature}
-                onChange={(e) => setSettings(s => ({ ...s, temperature: parseFloat(e.target.value) }))}
-                className="w-full h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
-              />
-              <p className="text-[10px] text-muted">
-                较低的值使输出更确定，较高的值使输出更有创意
-              </p>
-            </div>
-
-            {/* Max Tokens */}
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <label className="text-sm text-secondary">最大令牌数 (Max Tokens)</label>
-                <span className="text-sm text-muted tabular-nums">{settings.maxTokens}</span>
-              </div>
-              <input
-                type="range"
-                min="256"
-                max="8192"
-                step="256"
-                value={settings.maxTokens}
-                onChange={(e) => setSettings(s => ({ ...s, maxTokens: parseInt(e.target.value) }))}
-                className="w-full h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
-              />
-              <p className="text-[10px] text-muted">
-                控制 AI 回复的最大长度
-              </p>
-            </div>
-          </div>
+                {/* Max Tokens */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: 'text.primary' }}>最大令牌数 (Max Tokens)</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+                      {settings.maxTokens}
+                    </Typography>
+                  </Box>
+                  <Slider
+                    min={256}
+                    max={8192}
+                    step={256}
+                    value={settings.maxTokens}
+                    onChange={(_, value) => setSettings(s => ({ ...s, maxTokens: value as number }))}
+                    sx={{ color: 'primary.main' }}
+                  />
+                  <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
+                    控制 AI 回复的最大长度
+                  </FormHelperText>
+                </Box>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
         </div>
 
         {/* 底部按钮 */}
-        <div className="flex items-center justify-between p-4 border-t border-border bg-surface/50">
-          <button
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+          <Button
             onClick={() => {
               setSettings(DEFAULT_SETTINGS)
               setCustomUrl('')
               setCustomModel('')
             }}
-            className="px-4 py-2 text-sm text-muted hover:text-secondary hover:bg-white rounded transition-colors"
+            variant="text"
+            size="small"
+            sx={{
+              textTransform: 'none',
+              fontSize: '14px',
+              color: 'text.secondary',
+              '&:hover': {
+                bgcolor: 'background.paper',
+              },
+            }}
           >
             重置为默认
-          </button>
-          <div className="flex gap-2">
-            <button
+          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
               onClick={onClose}
-              className="px-4 py-2 text-sm text-muted hover:text-secondary border border-border rounded hover:bg-white transition-colors"
+              variant="outlined"
+              size="small"
+              sx={{
+                textTransform: 'none',
+                fontSize: '14px',
+                color: 'text.secondary',
+                borderColor: 'divider',
+                '&:hover': {
+                  bgcolor: 'background.paper',
+                  borderColor: 'divider',
+                },
+              }}
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleSave}
-              className="px-4 py-2 text-sm font-medium text-secondary bg-primary hover:brightness-105 rounded transition-all flex items-center gap-1.5"
+              variant="contained"
+              size="small"
+              startIcon={saved ? <Check className="w-4 h-4" /> : null}
+              sx={{
+                textTransform: 'none',
+                fontSize: '14px',
+                fontWeight: 500,
+                bgcolor: 'primary.main',
+                color: 'secondary.main',
+                '&:hover': {
+                  bgcolor: 'primary.dark',
+                },
+              }}
             >
-              {saved ? (
-                <>
-                  <Check className="w-4 h-4" />
-                  已保存
-                </>
-              ) : (
-                '保存设置'
-              )}
-            </button>
-          </div>
-        </div>
+              {saved ? '已保存' : '保存设置'}
+            </Button>
+          </Box>
+        </Box>
       </div>
     </div>
   )
