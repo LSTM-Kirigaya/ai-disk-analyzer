@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save } from 'lucide-react'
+import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save, Cloud } from 'lucide-react'
 import { Button, TextField, Typography, Fade, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { Treemap, type TreemapNode } from './Treemap'
@@ -12,7 +12,8 @@ import { analyzeWithAI, deleteItem, type AnalysisResult } from '../services/ai-a
 import { SuggestionCard } from './SuggestionCard'
 import { saveSnapshot, type Snapshot } from '../services/snapshot'
 import { readStorageFile, writeStorageFile } from '../services/storage'
-import { loadAppSettings, hasCloudStorageConfig, getDefaultCloudStorageConfig } from '../services/settings'
+import { loadAppSettings, getEnabledCloudStorageConfigs, type CloudStorageConfig } from '../services/settings'
+import { CloudStorageSelector } from './CloudStorageSelector'
 
 interface ScanResult {
     root: TreemapNode
@@ -44,19 +45,19 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
     const [fileListSummary, setFileListSummary] = useState('')
     const [instruction, setInstruction] = useState(DEFAULT_PROMPT_INSTRUCTION)
     const [copied, setCopied] = useState(false)
-    
+
     useEffect(() => {
         buildFileListSummary(result).then(setFileListSummary)
     }, [result])
-    
+
     useEffect(() => {
         loadPromptInstruction().then(setInstruction)
     }, [])
-    
-    useEffect(() => { 
-        void savePromptInstruction(instruction) 
+
+    useEffect(() => {
+        void savePromptInstruction(instruction)
     }, [instruction])
-    
+
     const copy = useCallback(() => {
         const fullPrompt = fileListSummary + '\n' + instruction
         void navigator.clipboard.writeText(fullPrompt).then(() => {
@@ -64,7 +65,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
             setTimeout(() => setCopied(false), 2000)
         })
     }, [fileListSummary, instruction])
-    
+
     return (
         <div className="flex flex-col p-6 gap-6 bg-white dark:bg-gray-800 rounded-3xl h-full animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
@@ -83,16 +84,16 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                     size="small"
                     startIcon={copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
                     sx={{
-                        borderRadius: '10px', 
-                        px: 3, 
-                        py: 0.9, 
+                        borderRadius: '10px',
+                        px: 3,
+                        py: 0.9,
                         textTransform: 'none',
-                        bgcolor: copied ? '#4caf50' : 'primary.main', 
+                        bgcolor: copied ? '#4caf50' : 'primary.main',
                         color: '#1A1A1A',
-                        fontWeight: 700, 
-                        fontSize: '12px', 
+                        fontWeight: 700,
+                        fontSize: '12px',
                         boxShadow: 'none',
-                        '&:hover': { 
+                        '&:hover': {
                             bgcolor: copied ? '#45a049' : 'primary.dark',
                             color: '#1A1A1A',
                         }
@@ -101,7 +102,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                     {copied ? '已复制' : '复制全文本'}
                 </Button>
             </div>
-            
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
                 <div className="flex flex-col gap-2">
                     <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">磁盘占用摘要</span>
@@ -122,7 +123,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                                 borderRadius: '20px',
                                 bgcolor: 'background.paper',
                                 fontSize: '14px',
-                                '& fieldset': { 
+                                '& fieldset': {
                                     borderColor: 'divider',
                                 },
                                 '&:hover fieldset': {
@@ -132,7 +133,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                                     borderColor: 'primary.main',
                                 },
                             },
-                            '& textarea': { 
+                            '& textarea': {
                                 height: '100% !important',
                                 color: 'text.primary',
                             },
@@ -165,7 +166,7 @@ function formatModified(ts: number | undefined | null): string {
 async function buildFileListSummary(result: ScanResult): Promise<string> {
     const settings = await loadAppSettings()
     const fileCount = settings.promptFileCount
-    
+
     const nodes: { path: string; size: number; modified?: number | null }[] = []
     function collect(n: TreemapNode, depth: number) {
         if (depth > 2) return
@@ -198,7 +199,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
     const [viewMode, setViewMode] = useState<'disk' | 'ai-prompt'>('disk')
     const [shallowDirs, setShallowDirs] = useState(true)
     const openedSettingsForStandardRef = useRef(false)
-    
+
     // 标准模式 AI 分析状态
     const [aiAnalyzing, setAiAnalyzing] = useState(false)
     const [aiProgress, setAiProgress] = useState('')
@@ -206,10 +207,16 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
     const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set())
     const [actionFilter, setActionFilter] = useState<'all' | 'delete' | 'move'>('all')
     const [hoveredPieIndex, setHoveredPieIndex] = useState<number | null>(null)
-    
+
     // 快照保存对话框
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [snapshotName, setSnapshotName] = useState('')
+
+    // 云存储选择相关状态
+    const [showCloudSelector, setShowCloudSelector] = useState(false)
+    const [availableConfigs, setAvailableConfigs] = useState<CloudStorageConfig[]>([])
+    const [selectedMigrationConfigs, setSelectedMigrationConfigs] = useState<CloudStorageConfig[]>([])
+    const [migrationTargetNames, setMigrationTargetNames] = useState<string>('')
 
     useEffect(() => {
         let unlisten: (() => void) | undefined
@@ -226,7 +233,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
         try {
             const res = await invoke<ScanResult>('scan_path_command', { path: targetPath, shallow_dirs: shallowDirs })
             setResult(res); setStatus('done');
-            
+
             // 标准模式：扫描完成后自动调用 AI 分析
             if (isAdmin === false) {
                 setAiAnalyzing(true)
@@ -260,26 +267,92 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
         setDeletedPaths(prev => new Set([...prev, itemPath]))
     }, [])
 
-    const handleMove = useCallback(async (itemPath: string) => {
-        // 预留迁移接口
-        void itemPath
-        throw new Error('迁移功能正在开发中')
-    }, [])
-    
+    const handleMove = useCallback(async (itemPath: string, configs?: CloudStorageConfig[], targetPath?: string) => {
+        // 使用传入的 configs 或全局设置的 selectedMigrationConfigs
+        const targetConfigs = configs || selectedMigrationConfigs
+        const cloudPath = targetPath || '/'
+
+        // 迁移到云存储
+        console.log('迁移文件到云存储:', { itemPath, targetConfigs, cloudPath })
+
+        if (!targetConfigs || targetConfigs.length === 0) {
+            throw new Error('未选择云存储目标')
+        }
+
+        // 动态导入 refreshGoogleToken
+        const { refreshGoogleToken } = await import('../services/settings')
+
+        // 构建上传配置，并检查/刷新 token
+        const uploadConfigs = []
+        for (const config of targetConfigs) {
+            if (!config.accessToken) {
+                throw new Error(`${config.name} 未登录，请先在设置中配置云存储`)
+            }
+
+            let accessToken = config.accessToken
+
+            // 检查 token 是否即将过期（5分钟内）
+            if (config.tokenExpiry) {
+                const expiryBuffer = 5 * 60 * 1000 // 5 分钟
+                if (config.tokenExpiry - Date.now() < expiryBuffer) {
+                    if (!config.refreshToken) {
+                        throw new Error(`${config.name} 登录已过期，请重新登录`)
+                    }
+                    // 刷新 token
+                    console.log(`刷新 ${config.name} 的 token...`)
+                    try {
+                        const newTokens = await refreshGoogleToken(config.refreshToken)
+                        accessToken = newTokens.access_token
+                    } catch (e) {
+                        throw new Error(`${config.name} token 刷新失败: ${e}`)
+                    }
+                }
+            }
+
+            uploadConfigs.push({
+                provider: config.provider,
+                name: config.name,
+                access_token: accessToken,
+                target_path: cloudPath,
+            })
+        }
+
+        // 调用后端上传 API
+        interface UploadResult {
+            success: boolean
+            provider: string
+            file_id: string | null
+            message: string
+        }
+
+        const results = await invoke<UploadResult[]>('upload_to_cloud', {
+            filePath: itemPath,
+            configs: uploadConfigs,
+        })
+
+        // 检查上传结果
+        const failed = results.filter(r => !r.success)
+        if (failed.length > 0) {
+            throw new Error(failed.map(r => r.message).join('\n'))
+        }
+
+        console.log('上传成功:', results)
+    }, [selectedMigrationConfigs])
+
     // 保存快照
     const handleSaveSnapshot = useCallback(() => {
         if (!result || !path) return
-        
+
         // 默认快照名称：路径的最后一部分 + 时间
         const pathParts = path.split(/[/\\]/).filter(Boolean)
         const defaultName = `${pathParts[pathParts.length - 1] || '未命名'} - ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
         setSnapshotName(defaultName)
         setShowSaveDialog(true)
     }, [result, path])
-    
+
     const handleConfirmSaveSnapshot = useCallback(async () => {
         if (!result || !path || !snapshotName.trim()) return
-        
+
         try {
             await saveSnapshot({
                 name: snapshotName.trim(),
@@ -293,23 +366,51 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
             alert(`保存失败：${e}`)
         }
     }, [result, path, snapshotName])
-    
+
+    // 设置迁移目标
+    const handleSetMigrationTarget = useCallback(async () => {
+        const configs = await getEnabledCloudStorageConfigs()
+
+        if (configs.length === 0) {
+            alert('请先配置至少一个云存储服务')
+            return
+        }
+
+        setAvailableConfigs(configs)
+        setShowCloudSelector(true)
+    }, [])
+
+    // 处理云存储选择
+    const handleCloudStorageSelected = useCallback((configs: CloudStorageConfig[]) => {
+        setSelectedMigrationConfigs(configs)
+        setShowCloudSelector(false)
+
+        // 更新显示的目标名称
+        if (configs.length === 0) {
+            setMigrationTargetNames('')
+        } else if (configs.length === 1) {
+            setMigrationTargetNames(configs[0].name)
+        } else {
+            setMigrationTargetNames(`${configs.length} 个云存储`)
+        }
+    }, [])
+
     // 加载快照
     useEffect(() => {
         if (!loadedSnapshot) return
-        
+
         setPath(loadedSnapshot.path)
         setResult(loadedSnapshot.scanResult)
         setStatus('done')
         setAnalysisResult(null)
         setDeletedPaths(new Set())
         setActionFilter('all')
-        
+
         // 标准模式：加载快照后自动进行 AI 分析
         if (isAdmin === false) {
             setAiAnalyzing(true)
             setAiProgress('准备 AI 分析...')
-            
+
             const runAIAnalysis = async () => {
                 try {
                     const summary = await buildFileListSummary(loadedSnapshot.scanResult)
@@ -322,10 +423,10 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                     setAiProgress('')
                 }
             }
-            
+
             void runAIAnalysis()
         }
-        
+
         // 清除已加载的快照
         onSnapshotLoaded?.()
     }, [loadedSnapshot, isAdmin, onSnapshotLoaded])
@@ -367,7 +468,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                     '& fieldset': { borderColor: 'transparent' },
                                     '&.Mui-focused fieldset': { borderColor: 'primary.main' },
                                     '&:hover': {
-                                      bgcolor: (theme) => theme.palette.mode === 'dark' ? '#4b5563' : undefined,
+                                        bgcolor: (theme) => theme.palette.mode === 'dark' ? '#4b5563' : undefined,
                                     },
                                     '& input::placeholder': { opacity: (theme) => theme.palette.mode === 'dark' ? 0.6 : 1, color: (theme) => theme.palette.mode === 'dark' ? '#9ca3af' : 'inherit' },
                                 }
@@ -412,7 +513,8 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                         >
                             {status === 'scanning' ? '分析中...' : '开始扫描'}
                         </Button>
-                        {result && status === 'done' && (
+                        {/* 只在开发者模式下显示保存快照按钮 */}
+                        {result && status === 'done' && isAdmin && (
                             <Tooltip title="保存快照" arrow>
                                 <Button
                                     onClick={handleSaveSnapshot}
@@ -573,7 +675,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                         analysisResult ? (
                             <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
                                 {/* 左侧：饼图和摘要 */}
-                                <div className="w-80 flex flex-col gap-3 shrink-0">
+                                <div className="w-80 flex flex-col gap-3 shrink-0 overflow-y-auto pr-2" style={{ maxHeight: '100%' }}>
                                     {/* AI 分析摘要 */}
                                     <div className="bg-white dark:bg-gray-800 px-4 py-3 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm">
                                         <div className="flex items-center gap-2 mb-2">
@@ -592,13 +694,46 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                 </span>
                                             </Tooltip>
                                         )}
+
+                                        {/* 迁移目标设置按钮 */}
+                                        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-gray-700">
+                                            <Button
+                                                size="small"
+                                                startIcon={<Cloud size={14} />}
+                                                onClick={handleSetMigrationTarget}
+                                                sx={{
+                                                    fontSize: '11px',
+                                                    textTransform: 'none',
+                                                    borderRadius: '8px',
+                                                    py: 0.75,
+                                                    px: 1.5,
+                                                    bgcolor: 'action.hover',
+                                                    color: 'text.secondary',
+                                                    '&:hover': {
+                                                        bgcolor: 'action.selected',
+                                                    },
+                                                    width: '100%',
+                                                    justifyContent: 'flex-start',
+                                                }}
+                                                className="dark:!bg-gray-700/50 dark:!text-gray-300 dark:hover:!bg-gray-700"
+                                            >
+                                                {migrationTargetNames ? (
+                                                    <>
+                                                        <span className="text-[10px] text-slate-500 dark:text-gray-400 mr-1">迁移至:</span>
+                                                        <span className="font-medium">{migrationTargetNames}</span>
+                                                    </>
+                                                ) : (
+                                                    '设置迁移目标'
+                                                )}
+                                            </Button>
+                                        </div>
                                     </div>
-                                    
+
                                     {/* 饼图：删除/迁移/保留占比 */}
                                     {(() => {
                                         const deleteSuggestions = analysisResult.suggestions.filter(s => s.action === 'delete' && !deletedPaths.has(s.path))
                                         const moveSuggestions = analysisResult.suggestions.filter(s => s.action === 'move' && !deletedPaths.has(s.path))
-                                        
+
                                         // 解析大小字符串为字节数
                                         const parseSize = (sizeStr: string): number => {
                                             const units: { [key: string]: number } = {
@@ -614,7 +749,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                             const unit = match[2].toUpperCase()
                                             return value * (units[unit] || 1)
                                         }
-                                        
+
                                         const deleteSize = deleteSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
                                         const moveSize = moveSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
                                         const totalSize = result?.total_size || 1
@@ -622,28 +757,28 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                         const deletePercent = ((deleteSize / totalSize) * 100).toFixed(1)
                                         const movePercent = ((moveSize / totalSize) * 100).toFixed(1)
                                         const remainPercent = ((remainSize / totalSize) * 100).toFixed(1)
-                                        
+
                                         // 检测是否为暗色模式
                                         const isDarkMode = document.documentElement.classList.contains('dark')
-                                        
+
                                         // 定义颜色常量 - 删除(红)、迁移(蓝)、保留(灰)
                                         const colors = {
                                             delete: '#ef4444',
                                             move: '#3b82f6',
                                             keep: isDarkMode ? '#4b5563' : '#e2e8f0',  // 暗色模式下用更深的灰色
                                         }
-                                        
+
                                         // 三部分数据：删除、迁移、保留
                                         const pieData = [
                                             { name: '删除', value: deleteSize, count: deleteSuggestions.length, percent: deletePercent, action: 'delete' as const, color: colors.delete },
                                             { name: '迁移', value: moveSize, count: moveSuggestions.length, percent: movePercent, action: 'move' as const, color: colors.move },
                                             { name: '保留', value: remainSize, count: 0, percent: remainPercent, action: 'keep' as const, color: colors.keep },
                                         ].filter(d => d.value > 0)
-                                        
+
                                         // 非线性缓动函数
                                         const springEasing = 'cubic-bezier(0.34, 1.56, 0.64, 1)'  // 弹性回弹
                                         const smoothEasing = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'  // 平滑减速
-                                        
+
                                         return (
                                             <div className="bg-white dark:bg-gray-800 px-4 py-6 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm dark:shadow-gray-900/20 flex flex-col items-center gap-3">
                                                 <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 self-start">建议操作</h3>
@@ -678,22 +813,22 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                                     const isHovered = hoveredPieIndex === index
                                                                     const isActive = actionFilter === entry.action
                                                                     const isKeep = entry.action === 'keep'
-                                                                    const opacity = isKeep 
+                                                                    const opacity = isKeep
                                                                         ? (isDarkMode ? 0.6 : 0.4)
                                                                         : (actionFilter === 'all' || isActive ? 1 : 0.3)
-                                                                    
+
                                                                     return (
-                                                                        <Cell 
-                                                                            key={`cell-${index}`} 
+                                                                        <Cell
+                                                                            key={`cell-${index}`}
                                                                             fill={entry.color}
                                                                             opacity={opacity}
                                                                             stroke={isHovered && !isKeep ? (isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.9)') : 'none'}
                                                                             strokeWidth={isHovered && !isKeep ? 3 : 0}
-                                                                            style={{ 
+                                                                            style={{
                                                                                 outline: 'none',
                                                                                 cursor: isKeep ? 'default' : 'pointer',
-                                                                                filter: isHovered && !isKeep 
-                                                                                    ? `drop-shadow(0 4px 12px ${entry.color}60)` 
+                                                                                filter: isHovered && !isKeep
+                                                                                    ? `drop-shadow(0 4px 12px ${entry.color}60)`
                                                                                     : 'none',
                                                                                 transition: `all 0.5s ${springEasing}`,
                                                                             }}
@@ -710,22 +845,22 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                                 const hoveredAction = hoveredPieIndex !== null ? pieData[hoveredPieIndex]?.action : null
                                                                 const activeAction = actionFilter !== 'all' ? actionFilter : null
                                                                 const displayAction = hoveredAction && hoveredAction !== 'keep' ? hoveredAction : activeAction
-                                                                
+
                                                                 if (displayAction === 'delete') {
                                                                     return (
                                                                         <>
-                                                                            <div 
+                                                                            <div
                                                                                 className="text-2xl font-bold"
-                                                                                style={{ 
+                                                                                style={{
                                                                                     color: colors.delete,
                                                                                     transition: `all 0.3s ${smoothEasing}`,
                                                                                 }}
                                                                             >
                                                                                 {deletePercent}%
                                                                             </div>
-                                                                            <div 
+                                                                            <div
                                                                                 className="text-xs font-medium"
-                                                                                style={{ 
+                                                                                style={{
                                                                                     color: colors.delete,
                                                                                     opacity: 0.8,
                                                                                     transition: `all 0.3s ${smoothEasing}`,
@@ -738,18 +873,18 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                                 } else if (displayAction === 'move') {
                                                                     return (
                                                                         <>
-                                                                            <div 
+                                                                            <div
                                                                                 className="text-2xl font-bold"
-                                                                                style={{ 
+                                                                                style={{
                                                                                     color: colors.move,
                                                                                     transition: `all 0.3s ${smoothEasing}`,
                                                                                 }}
                                                                             >
                                                                                 {movePercent}%
                                                                             </div>
-                                                                            <div 
+                                                                            <div
                                                                                 className="text-xs font-medium"
-                                                                                style={{ 
+                                                                                style={{
                                                                                     color: colors.move,
                                                                                     opacity: 0.8,
                                                                                     transition: `all 0.3s ${smoothEasing}`,
@@ -762,7 +897,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                                 } else {
                                                                     return (
                                                                         <>
-                                                                            <div 
+                                                                            <div
                                                                                 className="text-2xl font-bold text-slate-700 dark:text-gray-100"
                                                                                 style={{ transition: `all 0.3s ${smoothEasing}` }}
                                                                             >
@@ -789,24 +924,23 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                             }}
                                                             onMouseEnter={() => setHoveredPieIndex(index)}
                                                             onMouseLeave={() => setHoveredPieIndex(null)}
-                                                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl border-2 ${
-                                                                actionFilter === 'all' || actionFilter === item.action
+                                                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl border-2 ${actionFilter === 'all' || actionFilter === item.action
                                                                     ? 'bg-slate-100 dark:bg-gray-700/80 border-transparent'
                                                                     : 'bg-slate-50 dark:bg-gray-800/50 opacity-50 border-transparent'
-                                                            }`}
+                                                                }`}
                                                             style={{
                                                                 transform: hoveredPieIndex === index ? 'scale(1.03) translateY(-2px)' : 'scale(1) translateY(0)',
-                                                                boxShadow: hoveredPieIndex === index 
-                                                                    ? `0 8px 24px ${item.color}40, 0 0 0 2px ${item.color}30` 
+                                                                boxShadow: hoveredPieIndex === index
+                                                                    ? `0 8px 24px ${item.color}40, 0 0 0 2px ${item.color}30`
                                                                     : 'none',
                                                                 borderColor: hoveredPieIndex === index ? `${item.color}50` : 'transparent',
                                                                 transition: `all 0.4s ${springEasing}`,
                                                             }}
                                                         >
                                                             <div className="flex items-center gap-2">
-                                                                <div 
+                                                                <div
                                                                     className="w-3 h-3 rounded-full"
-                                                                    style={{ 
+                                                                    style={{
                                                                         backgroundColor: item.color,
                                                                         transform: hoveredPieIndex === index ? 'scale(1.4)' : 'scale(1)',
                                                                         boxShadow: hoveredPieIndex === index ? `0 0 8px ${item.color}80` : 'none',
@@ -818,7 +952,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                                 </span>
                                                             </div>
                                                             <div className="flex flex-col items-end">
-                                                                <span 
+                                                                <span
                                                                     className="text-lg font-bold text-slate-700 dark:text-gray-100"
                                                                     style={{
                                                                         color: hoveredPieIndex === index ? item.color : undefined,
@@ -837,7 +971,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                                     {pieData.find(d => d.action === 'keep') && (
                                                         <div className="flex items-center justify-between px-3 py-2 text-slate-400 dark:text-gray-400">
                                                             <div className="flex items-center gap-2">
-                                                                <div 
+                                                                <div
                                                                     className="w-2 h-2 rounded-full"
                                                                     style={{ backgroundColor: colors.keep }}
                                                                 ></div>
@@ -889,7 +1023,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                         <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-gray-500">
                                             <CheckCircle2 size={48} className="mb-2" />
                                             <Typography variant="body2">
-                                                {actionFilter === 'all' 
+                                                {actionFilter === 'all'
                                                     ? '暂无清理建议，磁盘空间使用良好'
                                                     : `暂无${actionFilter === 'delete' ? '删除' : '迁移'}建议`
                                                 }
@@ -946,7 +1080,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                     <p className="mt-2 text-xs text-slate-400 dark:text-gray-500">分析磁盘占用</p>
                 </div>
             )}
-            
+
             {/* 保存快照对话框 */}
             <Dialog
                 open={showSaveDialog}
@@ -1010,6 +1144,16 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            {/* 云存储选择对话框 */}
+            <CloudStorageSelector
+                open={showCloudSelector}
+                onClose={() => setShowCloudSelector(false)}
+                onConfirm={handleCloudStorageSelected}
+                availableConfigs={availableConfigs}
+                fileName="迁移文件"
+                preselectedConfigs={selectedMigrationConfigs}
+            />
         </div>
     );
 }

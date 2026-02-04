@@ -5,3 +5,5 @@ pub mod execute;
 pub mod permission;
 pub mod delete;
 pub mod storage;
+pub mod oauth;
+pub mod cloud_upload;

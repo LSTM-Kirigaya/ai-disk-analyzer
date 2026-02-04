@@ -1,8 +1,26 @@
 // 应用设置服务
 import { readJSON, writeJSON } from './storage'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface AppSettings {
   promptFileCount: number  // AI Prompt 中显示的文件数量
+}
+
+// OAuth Token 响应
+export interface OAuthTokens {
+  access_token: string
+  refresh_token?: string
+  expires_in: number
+  token_type: string
+  scope?: string
+}
+
+// Google 用户信息
+export interface GoogleUserInfo {
+  id: string
+  email: string
+  name: string
+  picture?: string
 }
 
 // 云存储服务类型
@@ -162,4 +180,79 @@ export async function getDefaultCloudStorageConfig(): Promise<CloudStorageConfig
     return settings.configs.find(c => c.provider === settings.defaultProvider && c.enabled) || null
   }
   return settings.configs.find(c => c.enabled) || null
+}
+
+// 获取所有已启用的云存储配置
+export async function getEnabledCloudStorageConfigs(): Promise<CloudStorageConfig[]> {
+  const settings = await loadCloudStorageSettings()
+  return settings.configs.filter(c => c.enabled)
+}
+
+// ===== OAuth 相关函数 =====
+
+// 启动 Google OAuth 授权流程（打开浏览器并等待回调）
+export async function startGoogleOAuth(): Promise<OAuthTokens> {
+  return await invoke<OAuthTokens>('complete_google_oauth')
+}
+
+// 刷新 Google OAuth access token
+export async function refreshGoogleToken(refreshToken: string): Promise<OAuthTokens> {
+  return await invoke<OAuthTokens>('refresh_google_token', { refreshToken })
+}
+
+// 撤销 Google OAuth 授权
+export async function revokeGoogleToken(token: string): Promise<void> {
+  return await invoke('revoke_google_token', { token })
+}
+
+// 获取 Google 用户信息
+export async function getGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo> {
+  return await invoke<GoogleUserInfo>('get_google_user_info', { accessToken })
+}
+
+// Google Drive 存储配额信息
+export interface GoogleDriveQuota {
+  storageQuota: {
+    limit: string      // 总容量（字节）
+    usage: string      // 已使用（字节）
+    usageInDrive: string      // Drive 中使用（字节）
+    usageInDriveTrash: string // 回收站中使用（字节）
+  }
+  user?: {
+    displayName: string
+    emailAddress: string
+    photoLink?: string
+  }
+}
+
+// 获取 Google Drive 存储配额
+export async function getGoogleDriveQuota(accessToken: string): Promise<GoogleDriveQuota> {
+  return await invoke<GoogleDriveQuota>('get_google_drive_quota', { accessToken })
+}
+
+// 检查并刷新 token（如果快过期）
+export async function ensureValidToken(config: CloudStorageConfig): Promise<CloudStorageConfig> {
+  if (!config.accessToken || !config.tokenExpiry) {
+    throw new Error('配置中缺少 access token')
+  }
+
+  // 如果 token 在 5 分钟内过期，刷新它
+  const now = Date.now()
+  const expiryBuffer = 5 * 60 * 1000 // 5 minutes
+  
+  if (config.tokenExpiry - now < expiryBuffer) {
+    if (!config.refreshToken) {
+      throw new Error('Token 已过期且没有 refresh token')
+    }
+    
+    const tokens = await refreshGoogleToken(config.refreshToken)
+    return {
+      ...config,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token || config.refreshToken,
+      tokenExpiry: now + tokens.expires_in * 1000,
+    }
+  }
+
+  return config
 }

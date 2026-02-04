@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react'
-import { Trash2, MoveRight, File, FolderOpen, Clock, HardDrive, AlertCircle, Check, X, Info, Cloud, Settings } from 'lucide-react'
-import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography, Box, Chip, Checkbox, FormControlLabel } from '@mui/material'
+import { Trash2, MoveRight, File, FolderOpen, Clock, HardDrive, Check, X, Info, Cloud, Settings } from 'lucide-react'
+import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography, Box, Chip, Checkbox, FormControlLabel, TextField, CircularProgress, LinearProgress } from '@mui/material'
 import type { CleanupSuggestion } from '../services/ai-analysis'
-import { readStorageFile, writeStorageFile } from '../services/storage'
-import { hasCloudStorageConfig, getDefaultCloudStorageConfig, CLOUD_STORAGE_PROVIDERS } from '../services/settings'
+import { readStorageFile } from '../services/storage'
+import { hasCloudStorageConfig, getDefaultCloudStorageConfig, getEnabledCloudStorageConfigs, CLOUD_STORAGE_PROVIDERS, type CloudStorageConfig } from '../services/settings'
+import { CloudStorageSelector } from './CloudStorageSelector'
 
 const SKIP_CONFIRM_KEY = 'skip-action-confirm'
 
 interface Props {
   suggestion: CleanupSuggestion
   onDelete: (path: string) => Promise<void>
-  onMove: (path: string) => Promise<void>
+  onMove: (path: string, configs?: CloudStorageConfig[], targetPath?: string) => Promise<void>
   onOpenCloudSettings?: () => void
 }
 
@@ -25,6 +26,10 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
   const [hasCloudConfig, setHasCloudConfig] = useState(false)
   const [cloudConfigName, setCloudConfigName] = useState<string | null>(null)
   const [showNoConfigDialog, setShowNoConfigDialog] = useState(false)
+  const [showCloudSelector, setShowCloudSelector] = useState(false)
+  const [availableConfigs, setAvailableConfigs] = useState<CloudStorageConfig[]>([])
+  const [selectedConfigs, setSelectedConfigs] = useState<CloudStorageConfig[]>([])
+  const [cloudTargetPath, setCloudTargetPath] = useState('/备份')
 
   useEffect(() => {
     readStorageFile(SKIP_CONFIRM_KEY).then(val => {
@@ -54,11 +59,22 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
     
     // 如果是迁移操作，先检查云存储配置
     if (suggestion.action === 'move') {
-      const hasConfig = await hasCloudStorageConfig()
-      if (!hasConfig) {
+      const configs = await getEnabledCloudStorageConfigs()
+      
+      if (configs.length === 0) {
         setShowNoConfigDialog(true)
         return
       }
+      
+      // 如果有多个云存储配置，显示选择对话框
+      if (configs.length > 1) {
+        setAvailableConfigs(configs)
+        setShowCloudSelector(true)
+        return
+      }
+      
+      // 如果只有一个，直接使用
+      setSelectedConfigs(configs)
     }
     
     if (skipConfirm) {
@@ -76,7 +92,11 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
       if (suggestion.action === 'delete') {
         await onDelete(suggestion.path)
       } else {
-        await onMove(suggestion.path)
+        await onMove(
+          suggestion.path, 
+          selectedConfigs.length > 0 ? selectedConfigs : undefined,
+          cloudTargetPath
+        )
       }
       setSuccess(true)
       setTimeout(() => {
@@ -90,10 +110,22 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
     }
   }
 
+  const handleCloudStorageSelected = (configs: CloudStorageConfig[]) => {
+    setSelectedConfigs(configs)
+    setShowCloudSelector(false)
+    
+    // 选择完成后，继续执行确认流程
+    if (skipConfirm) {
+      executeAction()
+    } else {
+      setShowConfirm(true)
+    }
+  }
+
   const handleConfirm = async () => {
+    // "本次不再提醒"：只在当前会话有效，不持久化
     if (dontAskAgain) {
       setSkipConfirm(true)
-      await writeStorageFile(SKIP_CONFIRM_KEY, 'true')
     }
     await executeAction()
   }
@@ -237,6 +269,43 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 操作成功！
               </Typography>
             </Box>
+          ) : loading && suggestion.action === 'move' ? (
+            // 上传进度显示
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 3 }}>
+              <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                <CircularProgress size={60} thickness={4} />
+                <Box
+                  sx={{
+                    top: 0,
+                    left: 0,
+                    bottom: 0,
+                    right: 0,
+                    position: 'absolute',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Cloud size={24} className="text-primary" />
+                </Box>
+              </Box>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                正在上传到云存储...
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary', textAlign: 'center' }}>
+                {selectedConfigs.length === 1 
+                  ? `上传到 ${selectedConfigs[0].name}` 
+                  : `上传到 ${selectedConfigs.length} 个云存储`}
+              </Typography>
+              <LinearProgress 
+                sx={{ 
+                  width: '100%', 
+                  borderRadius: 2,
+                  height: 6,
+                  bgcolor: 'action.hover',
+                }} 
+              />
+            </Box>
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box 
@@ -260,22 +329,49 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 </Typography>
               </Box>
 
-              {suggestion.action === 'move' && hasCloudConfig && (
-                <Box 
-                  sx={{ 
-                    display: 'flex', 
-                    alignItems: 'start', 
-                    gap: 1, 
-                    p: 1.5, 
-                    bgcolor: 'primary.main', 
-                    color: '#1A1A1A', 
-                    borderRadius: '8px',
-                  }}
-                >
-                  <Cloud size={14} className="shrink-0 mt-0.5" />
-                  <Typography variant="caption" sx={{ fontSize: '11px' }}>
-                    将迁移到：{cloudConfigName}
-                  </Typography>
+              {suggestion.action === 'move' && selectedConfigs.length > 0 && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box 
+                    sx={{ 
+                      display: 'flex', 
+                      alignItems: 'start', 
+                      gap: 1, 
+                      p: 1.5, 
+                      bgcolor: 'primary.main', 
+                      color: '#1A1A1A', 
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <Cloud size={14} className="shrink-0 mt-0.5" />
+                    <Typography variant="caption" sx={{ fontSize: '11px' }}>
+                      将迁移到：{selectedConfigs.length === 1 ? selectedConfigs[0].name : `${selectedConfigs.length} 个云存储`}
+                    </Typography>
+                  </Box>
+                  
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="云存储目标路径"
+                    value={cloudTargetPath}
+                    onChange={(e) => setCloudTargetPath(e.target.value)}
+                    placeholder="例如：/备份/文档"
+                    helperText="文件将上传到云存储的此路径下"
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        mt: 1,
+                      },
+                      '& .MuiInputLabel-root': {
+                        fontSize: '12px',
+                        mt: 1,
+                      },
+                      '& .MuiFormHelperText-root': {
+                        fontSize: '10px',
+                        mt: 0.5,
+                      }
+                    }}
+                  />
                 </Box>
               )}
 
@@ -314,7 +410,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 }
                 label={
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '11px' }} className="dark:text-gray-400">
-                    下次不再提醒
+                    本次不再提醒
                   </Typography>
                 }
                 sx={{ ml: 0, mt: 1 }}
@@ -704,6 +800,15 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 云存储选择对话框 */}
+      <CloudStorageSelector
+        open={showCloudSelector}
+        onClose={() => setShowCloudSelector(false)}
+        onConfirm={handleCloudStorageSelected}
+        availableConfigs={availableConfigs}
+        fileName={suggestion.path.split('/').pop() || suggestion.path}
+      />
     </>
   )
 }

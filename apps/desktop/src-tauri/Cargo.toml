@@ -16,6 +16,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 is_elevated = "0.1"
 
+# OAuth dependencies
+tokio = { version = "1", features = ["rt-multi-thread"] }
+reqwest = { version = "0.12", features = ["json"] }
+rand = "0.8"
+base64 = "0.22"
+sha2 = "0.10"
+open = "5"
+tiny_http = "0.12"
+urlencoding = "2"
+dotenvy_macro = "0.15"
+
 # Workspace crates
 ai-disk-common = { path = "../../../crates/common" }
 ai-disk-domain = { path = "../../../crates/domain-model" }

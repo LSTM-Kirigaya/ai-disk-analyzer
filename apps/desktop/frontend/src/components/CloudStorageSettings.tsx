@@ -7,10 +7,11 @@ import {
   AlertCircle,
   ExternalLink,
   Server,
-  Key,
   FolderOpen,
   Settings2,
   HardDrive,
+  User,
+  LogOut,
 } from 'lucide-react'
 import {
   Box,
@@ -29,16 +30,23 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  CircularProgress,
+  Avatar,
 } from '@mui/material'
 import { open } from '@tauri-apps/plugin-shell'
 import {
   loadCloudStorageSettings,
   saveCloudStorageSettings,
   CLOUD_STORAGE_PROVIDERS,
+  startGoogleOAuth,
+  getGoogleUserInfo,
+  getGoogleDriveQuota,
+  revokeGoogleToken,
   type CloudStorageSettings as CloudStorageSettingsType,
   type CloudStorageConfig,
   type CloudStorageProvider,
-  type CloudStorageProviderInfo,
+  type GoogleUserInfo,
+  type GoogleDriveQuota,
 } from '../services/settings'
 
 interface Props {
@@ -87,6 +95,9 @@ function ProviderIcon({ provider, size = 20 }: { provider: CloudStorageProvider;
   return <>{iconMap[provider]}</>
 }
 
+// 支持 OAuth 的提供商
+const OAUTH_PROVIDERS: CloudStorageProvider[] = ['google_drive']
+
 // 添加/编辑配置对话框
 function ConfigDialog({
   open: dialogOpen,
@@ -101,47 +112,156 @@ function ConfigDialog({
 }) {
   const [provider, setProvider] = useState<CloudStorageProvider>('google_drive')
   const [name, setName] = useState('')
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
   const [webdavUrl, setWebdavUrl] = useState('')
   const [webdavUsername, setWebdavUsername] = useState('')
   const [webdavPassword, setWebdavPassword] = useState('')
   const [targetFolder, setTargetFolder] = useState('/DiskRookie')
+  
+  // OAuth 状态
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [userInfo, setUserInfo] = useState<GoogleUserInfo | null>(null)
+  const [tokens, setTokens] = useState<{ accessToken: string; refreshToken?: string; tokenExpiry: number } | null>(null)
+  const [driveQuota, setDriveQuota] = useState<GoogleDriveQuota | null>(null)
 
   useEffect(() => {
-    if (config) {
-      setProvider(config.provider)
-      setName(config.name)
-      setClientId(config.clientId || '')
-      setClientSecret(config.clientSecret || '')
-      setWebdavUrl(config.webdavUrl || '')
-      setWebdavUsername(config.webdavUsername || '')
-      setWebdavPassword(config.webdavPassword || '')
-      setTargetFolder(config.targetFolder || '/DiskRookie')
-    } else {
-      setProvider('google_drive')
-      setName('')
-      setClientId('')
-      setClientSecret('')
-      setWebdavUrl('')
-      setWebdavUsername('')
-      setWebdavPassword('')
-      setTargetFolder('/DiskRookie')
+    if (dialogOpen) {
+      if (config) {
+        setProvider(config.provider)
+        setName(config.name)
+        setWebdavUrl(config.webdavUrl || '')
+        setWebdavUsername(config.webdavUsername || '')
+        setWebdavPassword(config.webdavPassword || '')
+        setTargetFolder(config.targetFolder || '/DiskRookie')
+        
+        // 如果已经有 token，尝试获取用户信息和存储配额
+        if (config.accessToken) {
+          setTokens({
+            accessToken: config.accessToken,
+            refreshToken: config.refreshToken,
+            tokenExpiry: config.tokenExpiry || 0,
+          })
+          // 获取用户信息
+          getGoogleUserInfo(config.accessToken)
+            .then(setUserInfo)
+            .catch(() => setUserInfo(null))
+          // 获取存储配额
+          getGoogleDriveQuota(config.accessToken)
+            .then(setDriveQuota)
+            .catch(() => setDriveQuota(null))
+        }
+      } else {
+        setProvider('google_drive')
+        setName('')
+        setWebdavUrl('')
+        setWebdavUsername('')
+        setWebdavPassword('')
+        setTargetFolder('/DiskRookie')
+        setUserInfo(null)
+        setTokens(null)
+        setDriveQuota(null)
+      }
+      setAuthError(null)
+      setIsAuthenticating(false)
     }
   }, [config, dialogOpen])
 
   const providerInfo = CLOUD_STORAGE_PROVIDERS.find(p => p.id === provider)
   const isWebDAV = provider === 'webdav'
+  const isOAuthProvider = OAUTH_PROVIDERS.includes(provider)
+
+  // 处理 Google OAuth 登录
+  const handleGoogleLogin = async () => {
+    setIsAuthenticating(true)
+    setAuthError(null)
+    
+    try {
+      const oauthTokens = await startGoogleOAuth()
+      
+      const now = Date.now()
+      setTokens({
+        accessToken: oauthTokens.access_token,
+        refreshToken: oauthTokens.refresh_token,
+        tokenExpiry: now + oauthTokens.expires_in * 1000,
+      })
+      
+      // 获取用户信息（失败不影响授权成功）
+      try {
+        const info = await getGoogleUserInfo(oauthTokens.access_token)
+        setUserInfo(info)
+        
+        // 自动设置名称
+        if (!name && info.email) {
+          setName(info.email)
+        }
+      } catch (userInfoErr) {
+        console.warn('获取用户信息失败，但授权已成功:', userInfoErr)
+        // 用户信息获取失败不影响授权成功，使用默认值
+        setUserInfo({
+          id: '',
+          email: '',
+          name: 'Google 用户',
+        })
+      }
+      
+      // 获取存储配额
+      try {
+        const quota = await getGoogleDriveQuota(oauthTokens.access_token)
+        setDriveQuota(quota)
+      } catch (quotaErr) {
+        console.warn('获取存储配额失败:', quotaErr)
+        setDriveQuota(null)
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : '授权失败')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  // 处理断开连接
+  const handleDisconnect = async () => {
+    if (tokens?.accessToken) {
+      try {
+        await revokeGoogleToken(tokens.accessToken)
+      } catch {
+        // 忽略撤销错误
+      }
+    }
+    setTokens(null)
+    setUserInfo(null)
+    setDriveQuota(null)
+  }
+  
+  // 格式化存储容量
+  const formatStorageSize = (bytes: string | number): string => {
+    const num = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes
+    if (isNaN(num)) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    let size = num
+    let unitIndex = 0
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024
+      unitIndex++
+    }
+    return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`
+  }
 
   const handleSave = () => {
     const newConfig: CloudStorageConfig = {
       provider,
-      name: name || providerInfo?.name || provider,
+      name: name || userInfo?.email || providerInfo?.name || provider,
       enabled: true,
       targetFolder,
       ...(isWebDAV
         ? { webdavUrl, webdavUsername, webdavPassword }
-        : { clientId, clientSecret }),
+        : isOAuthProvider && tokens
+        ? {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            tokenExpiry: tokens.tokenExpiry,
+          }
+        : {}),
     }
     onSave(newConfig)
     onClose()
@@ -149,7 +269,9 @@ function ConfigDialog({
 
   const isValid = isWebDAV
     ? webdavUrl && webdavUsername && webdavPassword
-    : clientId && clientSecret
+    : isOAuthProvider
+    ? !!tokens
+    : false
 
   return (
     <Dialog
@@ -181,8 +303,14 @@ function ConfigDialog({
             <FormControl fullWidth size="small">
               <Select
                 value={provider}
-                onChange={(e) => setProvider(e.target.value as CloudStorageProvider)}
+                onChange={(e) => {
+                  setProvider(e.target.value as CloudStorageProvider)
+                  setTokens(null)
+                  setUserInfo(null)
+                  setAuthError(null)
+                }}
                 sx={{ fontSize: '14px' }}
+                disabled={!!config} // 编辑时不能更改提供商
               >
                 {CLOUD_STORAGE_PROVIDERS.map((p) => (
                   <MenuItem key={p.id} value={p.id} disabled={!p.available}>
@@ -204,84 +332,151 @@ function ConfigDialog({
             )}
           </Box>
 
-          {/* 自定义名称 */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-              显示名称（可选）
-            </Typography>
-            <TextField
-              fullWidth
-              size="small"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={providerInfo?.name || '输入名称...'}
-              sx={{ fontSize: '14px' }}
-            />
-          </Box>
-
-          {/* OAuth 配置 */}
-          {!isWebDAV && (
-            <>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  Client ID
-                </Typography>
-                <TextField
-                  fullWidth
-                  size="small"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="输入 OAuth Client ID..."
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Key size={14} className="text-slate-400" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ fontSize: '14px' }}
-                />
-              </Box>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  Client Secret
-                </Typography>
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="输入 OAuth Client Secret..."
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Key size={14} className="text-slate-400" />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ fontSize: '14px' }}
-                />
-              </Box>
-
-              {providerInfo?.docUrl && (
-                <Button
-                  size="small"
-                  onClick={() => open(providerInfo.docUrl!)}
-                  startIcon={<ExternalLink size={14} />}
-                  sx={{
-                    textTransform: 'none',
-                    fontSize: '12px',
-                    color: 'primary.main',
-                    justifyContent: 'flex-start',
-                    px: 1,
-                  }}
-                >
-                  查看如何获取 OAuth 凭据
-                </Button>
+          {/* OAuth 登录区域 */}
+          {isOAuthProvider && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                账号连接
+              </Typography>
+              
+              {userInfo ? (
+                // 已连接状态
+                <>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      p: 2,
+                      borderRadius: '12px',
+                      bgcolor: 'success.main',
+                      color: 'white',
+                    }}
+                  >
+                    <Avatar 
+                      src={userInfo.picture} 
+                      sx={{ width: 40, height: 40 }}
+                    >
+                      <User size={20} />
+                    </Avatar>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {userInfo.name}
+                      </Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                        {userInfo.email}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      size="small"
+                      onClick={handleDisconnect}
+                      sx={{ color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+                    >
+                      <LogOut size={18} />
+                    </IconButton>
+                  </Box>
+                  
+                  {/* 存储容量显示 */}
+                  {driveQuota?.storageQuota && (
+                    <Box
+                      sx={{
+                        mt: 1.5,
+                        p: 2,
+                        borderRadius: '10px',
+                        bgcolor: 'action.hover',
+                      }}
+                      className="dark:!bg-gray-700/50"
+                    >
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                          存储空间
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          {formatStorageSize(driveQuota.storageQuota.usage)} / {formatStorageSize(driveQuota.storageQuota.limit)}
+                        </Typography>
+                      </Box>
+                      <Box
+                        sx={{
+                          width: '100%',
+                          height: 6,
+                          borderRadius: 3,
+                          bgcolor: 'divider',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: `${Math.min(100, (parseInt(driveQuota.storageQuota.usage) / parseInt(driveQuota.storageQuota.limit)) * 100)}%`,
+                            height: '100%',
+                            borderRadius: 3,
+                            bgcolor: parseInt(driveQuota.storageQuota.usage) / parseInt(driveQuota.storageQuota.limit) > 0.9 
+                              ? 'error.main' 
+                              : parseInt(driveQuota.storageQuota.usage) / parseInt(driveQuota.storageQuota.limit) > 0.7 
+                              ? 'warning.main' 
+                              : 'primary.main',
+                            transition: 'width 0.3s ease',
+                          }}
+                        />
+                      </Box>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block', fontSize: '10px' }}>
+                        可用: {formatStorageSize(parseInt(driveQuota.storageQuota.limit) - parseInt(driveQuota.storageQuota.usage))}
+                      </Typography>
+                    </Box>
+                  )}
+                </>
+              ) : (
+                // 未连接状态
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Button
+                    variant="contained"
+                    onClick={handleGoogleLogin}
+                    disabled={isAuthenticating}
+                    startIcon={
+                      isAuthenticating ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : (
+                        <ProviderIcon provider={provider} size={18} />
+                      )
+                    }
+                    sx={{
+                      textTransform: 'none',
+                      borderRadius: '10px',
+                      py: 1.5,
+                      bgcolor: provider === 'google_drive' ? '#4285F4' : 'primary.main',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      '&:hover': {
+                        bgcolor: provider === 'google_drive' ? '#3367D6' : 'primary.dark',
+                      },
+                    }}
+                  >
+                    {isAuthenticating ? '正在授权...' : `使用 ${providerInfo?.name} 登录`}
+                  </Button>
+                  
+                  {authError && (
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        p: 1.5,
+                        borderRadius: '8px',
+                        bgcolor: 'error.main',
+                        color: 'white',
+                      }}
+                    >
+                      <AlertCircle size={14} />
+                      <Typography variant="caption">{authError}</Typography>
+                    </Box>
+                  )}
+                  
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '11px' }}>
+                    点击按钮后将在浏览器中打开授权页面，请在浏览器中完成登录
+                  </Typography>
+                </Box>
               )}
-            </>
+            </Box>
           )}
 
           {/* WebDAV 配置 */}
@@ -362,49 +557,70 @@ function ConfigDialog({
             </>
           )}
 
-          {/* 目标文件夹 */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-              迁移目标文件夹
-            </Typography>
-            <TextField
-              fullWidth
-              size="small"
-              value={targetFolder}
-              onChange={(e) => setTargetFolder(e.target.value)}
-              placeholder="/DiskRookie"
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <FolderOpen size={14} className="text-slate-400" />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ fontSize: '14px' }}
-            />
-            <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-              文件将迁移到此目录下
-            </FormHelperText>
-          </Box>
+          {/* 自定义名称（仅当已连接或 WebDAV 时显示） */}
+          {(userInfo || isWebDAV) && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                显示名称（可选）
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={userInfo?.email || providerInfo?.name || '输入名称...'}
+                sx={{ fontSize: '14px' }}
+              />
+            </Box>
+          )}
 
-          {/* NAS 提示 */}
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'start',
-              gap: 1.5,
-              p: 2,
-              bgcolor: 'info.main',
-              color: 'white',
-              borderRadius: '10px',
-              opacity: 0.9,
-            }}
-          >
-            <HardDrive size={16} className="shrink-0 mt-0.5" />
-            <Typography variant="body2" sx={{ fontSize: '12px' }}>
-              NAS 服务（如群晖、威联通）可通过 WebDAV 协议连接，请在 NAS 中开启 WebDAV 服务
-            </Typography>
-          </Box>
+          {/* 目标文件夹（仅当已连接或 WebDAV 时显示） */}
+          {(userInfo || isWebDAV) && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                迁移目标文件夹
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                value={targetFolder}
+                onChange={(e) => setTargetFolder(e.target.value)}
+                placeholder="/DiskRookie"
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <FolderOpen size={14} className="text-slate-400" />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ fontSize: '14px' }}
+              />
+              <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
+                文件将迁移到此目录下
+              </FormHelperText>
+            </Box>
+          )}
+
+          {/* NAS 提示（仅 WebDAV） */}
+          {isWebDAV && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'start',
+                gap: 1.5,
+                p: 2,
+                bgcolor: 'info.main',
+                color: 'white',
+                borderRadius: '10px',
+                opacity: 0.9,
+              }}
+            >
+              <HardDrive size={16} className="shrink-0 mt-0.5" />
+              <Typography variant="body2" sx={{ fontSize: '12px' }}>
+                NAS 服务（如群晖、威联通）可通过 WebDAV 协议连接，请在 NAS 中开启 WebDAV 服务
+              </Typography>
+            </Box>
+          )}
         </Box>
       </DialogContent>
 
@@ -469,14 +685,14 @@ export function CloudStorageSettings({ onConfigured }: Props) {
         )
       : [...settings.configs, config]
     
-    const newSettings = {
+    const newSettings: CloudStorageSettingsType = {
       ...settings,
       configs: newConfigs,
-      defaultProvider: newSettings.defaultProvider || config.provider,
+      defaultProvider: settings.defaultProvider || config.provider,
     }
     
-    setSettings({ ...settings, configs: newConfigs, defaultProvider: settings.defaultProvider || config.provider })
-    await saveCloudStorageSettings({ ...settings, configs: newConfigs, defaultProvider: settings.defaultProvider || config.provider })
+    setSettings(newSettings)
+    await saveCloudStorageSettings(newSettings)
     setEditingConfig(null)
     
     setSaved(true)

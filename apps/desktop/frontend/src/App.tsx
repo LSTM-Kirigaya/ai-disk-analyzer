@@ -124,7 +124,7 @@ function App() {
               top: '50%',
               transform: 'translateY(-50%)',
               display: 'flex',
-              gap: 0.5,
+              gap: 1,
               alignItems: 'center',
               zIndex: 1000,
             }}
