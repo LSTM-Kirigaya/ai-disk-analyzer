@@ -27,6 +27,7 @@ import {
   type AISettings as AISettingsType,
   type ModelInfo,
 } from '../services/ai'
+import { loadAppSettings, saveAppSettings, type AppSettings } from '../services/settings'
 
 interface Props {
   onClose: () => void
@@ -34,6 +35,7 @@ interface Props {
 
 export function AISettings({ onClose }: Props) {
   const [settings, setSettings] = useState<AISettingsType>(DEFAULT_SETTINGS)
+  const [appSettings, setAppSettings] = useState<AppSettings>({ promptFileCount: 100 })
   const [showApiKey, setShowApiKey] = useState(false)
   const [saved, setSaved] = useState(false)
   const [customUrl, setCustomUrl] = useState('')
@@ -57,6 +59,10 @@ export function AISettings({ onClose }: Props) {
       if (!modelPreset) {
         setCustomModel(loaded.model)
       }
+    })
+    
+    loadAppSettings().then(loaded => {
+      setAppSettings(loaded)
     })
   }, [])
 
@@ -92,6 +98,7 @@ export function AISettings({ onClose }: Props) {
   const handleSave = async () => {
     try {
       await saveSettings(settings)
+      await saveAppSettings(appSettings)
       setSaved(true)
       // 保存成功后短暂显示「已保存」再自动关闭对话框
       setTimeout(() => {
@@ -336,6 +343,32 @@ export function AISettings({ onClose }: Props) {
                     控制 AI 回复的最大长度
                   </FormHelperText>
                 </Box>
+
+                {/* Prompt File Count */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: 'text.primary' }}>Prompt 文件数量</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+                      {appSettings.promptFileCount}
+                    </Typography>
+                  </Box>
+                  <Slider
+                    min={20}
+                    max={200}
+                    step={10}
+                    value={appSettings.promptFileCount}
+                    onChange={(_, value) => setAppSettings(s => ({ ...s, promptFileCount: value as number }))}
+                    sx={{ color: 'primary.main' }}
+                    marks={[
+                      { value: 20, label: '20' },
+                      { value: 100, label: '100' },
+                      { value: 200, label: '200' },
+                    ]}
+                  />
+                  <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
+                    控制发送给 AI 的文件列表数量（更多文件会消耗更多 Token）
+                  </FormHelperText>
+                </Box>
               </Box>
             </AccordionDetails>
           </Accordion>
@@ -343,25 +376,26 @@ export function AISettings({ onClose }: Props) {
 
         {/* 底部按钮 */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }} className="dark:!bg-gray-700/50 dark:!border-gray-600">
-          <Button
-            onClick={() => {
-              setSettings(DEFAULT_SETTINGS)
-              setCustomUrl('')
-              setCustomModel('')
-            }}
-            variant="text"
-            size="small"
-            sx={{
-              textTransform: 'none',
-              fontSize: '14px',
-              color: 'text.secondary',
-              '&:hover': {
-                bgcolor: 'background.paper',
-              },
-            }}
-          >
-            重置为默认
-          </Button>
+            <Button
+              onClick={() => {
+                setSettings(DEFAULT_SETTINGS)
+                setAppSettings({ promptFileCount: 100 })
+                setCustomUrl('')
+                setCustomModel('')
+              }}
+              variant="text"
+              size="small"
+              sx={{
+                textTransform: 'none',
+                fontSize: '14px',
+                color: 'text.secondary',
+                '&:hover': {
+                  bgcolor: 'background.paper',
+                },
+              }}
+            >
+              重置为默认
+            </Button>
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button
               onClick={onClose}

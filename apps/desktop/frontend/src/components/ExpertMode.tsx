@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save } from 'lucide-react'
-import { Button, TextField, Typography, Fade, Tooltip, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
+import { Button, TextField, Typography, Fade, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
+import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts'
 import { Treemap, type TreemapNode } from './Treemap'
 import { formatBytes, formatDuration } from '../utils/format'
 import { loadSettings } from '../services/ai'
@@ -11,6 +12,7 @@ import { analyzeWithAI, deleteItem, type AnalysisResult } from '../services/ai-a
 import { SuggestionCard } from './SuggestionCard'
 import { saveSnapshot, type Snapshot } from '../services/snapshot'
 import { readStorageFile, writeStorageFile } from '../services/storage'
+import { loadAppSettings } from '../services/settings'
 
 interface ScanResult {
     root: TreemapNode
@@ -20,7 +22,7 @@ interface ScanResult {
 }
 
 const PROMPT_INSTRUCTION_FILE = 'prompt-instruction.txt'
-const DEFAULT_PROMPT_INSTRUCTION = '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
+const DEFAULT_PROMPT_INSTRUCTION = '请根据以上占用，简要指出可安全清理或迁移的大项，并给出操作建议。'
 
 async function loadPromptInstruction(): Promise<string> {
     try {
@@ -38,10 +40,14 @@ async function savePromptInstruction(instruction: string): Promise<void> {
 }
 
 /** AI 提示面板 */
-function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPrompt: (r: ScanResult) => string }) {
-    const fileListSummary = useMemo(() => buildPrompt(result), [result, buildPrompt])
+function AIPromptPanel({ result }: { result: ScanResult }) {
+    const [fileListSummary, setFileListSummary] = useState('')
     const [instruction, setInstruction] = useState(DEFAULT_PROMPT_INSTRUCTION)
     const [copied, setCopied] = useState(false)
+    
+    useEffect(() => {
+        buildFileListSummary(result).then(setFileListSummary)
+    }, [result])
     
     useEffect(() => {
         loadPromptInstruction().then(setInstruction)
@@ -77,10 +83,19 @@ function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPromp
                     size="small"
                     startIcon={copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
                     sx={{
-                        borderRadius: '10px', px: 3, py: 0.9, textTransform: 'none',
-                        bgcolor: copied ? '#4caf50' : 'primary.main', color: 'secondary.main',
-                        fontWeight: 700, fontSize: '12px', boxShadow: 'none',
-                        '&:hover': { bgcolor: copied ? '#45a049' : 'primary.dark' }
+                        borderRadius: '10px', 
+                        px: 3, 
+                        py: 0.9, 
+                        textTransform: 'none',
+                        bgcolor: copied ? '#4caf50' : 'primary.main', 
+                        color: '#1A1A1A',
+                        fontWeight: 700, 
+                        fontSize: '12px', 
+                        boxShadow: 'none',
+                        '&:hover': { 
+                            bgcolor: copied ? '#45a049' : 'primary.dark',
+                            color: '#1A1A1A',
+                        }
                     }}
                 >
                     {copied ? '已复制' : '复制全文本'}
@@ -103,10 +118,28 @@ function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPromp
                         sx={{
                             flex: 1,
                             '& .MuiInputBase-root': {
-                                height: '100%', borderRadius: '20px', bgcolor: '#fff', fontSize: '14px',
-                                '& fieldset': { borderColor: '#e2e8f0' },
+                                height: '100%',
+                                borderRadius: '20px',
+                                bgcolor: 'background.paper',
+                                fontSize: '14px',
+                                '& fieldset': { 
+                                    borderColor: 'divider',
+                                },
+                                '&:hover fieldset': {
+                                    borderColor: 'primary.main',
+                                },
+                                '&.Mui-focused fieldset': {
+                                    borderColor: 'primary.main',
+                                },
                             },
-                            '& textarea': { height: '100% !important' }
+                            '& textarea': { 
+                                height: '100% !important',
+                                color: 'text.primary',
+                            },
+                            '& .MuiInputBase-input::placeholder': {
+                                color: 'text.secondary',
+                                opacity: 0.6,
+                            }
                         }}
                     />
                 </div>
@@ -129,7 +162,10 @@ function formatModified(ts: number | undefined | null): string {
     }
 }
 
-function buildFileListSummary(result: ScanResult): string {
+async function buildFileListSummary(result: ScanResult): Promise<string> {
+    const settings = await loadAppSettings()
+    const fileCount = settings.promptFileCount
+    
     const nodes: { path: string; size: number; modified?: number | null }[] = []
     function collect(n: TreemapNode, depth: number) {
         if (depth > 2) return
@@ -139,7 +175,7 @@ function buildFileListSummary(result: ScanResult): string {
         }
     }
     collect(result.root, 0)
-    const items = nodes.sort((a, b) => b.size - a.size).slice(0, 20)
+    const items = nodes.sort((a, b) => b.size - a.size).slice(0, fileCount)
     const header = '| 路径 | 大小 | 最近修改时间 |\n| --- | --- | --- |\n'
     const rows = items.map(n => `| ${displayPath(n.path)} | ${formatBytes(n.size)} | ${formatModified(n.modified)} |`).join('\n')
     return `[磁盘分析结果]\n总大小: ${formatBytes(result.total_size)}，文件数: ${result.file_count}\n\n${header}${rows}`
@@ -168,6 +204,8 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
     const [aiProgress, setAiProgress] = useState('')
     const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
     const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set())
+    const [actionFilter, setActionFilter] = useState<'all' | 'delete' | 'move'>('all')
+    const [hoveredPieIndex, setHoveredPieIndex] = useState<number | null>(null)
     
     // 快照保存对话框
     const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -198,7 +236,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
 
     const runScan = useCallback(async (targetPath: string) => {
         if (!targetPath) return
-        setStatus('scanning'); setErrorMsg(''); setResult(null); setProgressFiles(0); setAnalysisResult(null);
+        setStatus('scanning'); setErrorMsg(''); setResult(null); setProgressFiles(0); setAnalysisResult(null); setActionFilter('all');
         try {
             const res = await invoke<ScanResult>('scan_path_command', { path: targetPath, shallow_dirs: shallowDirs })
             setResult(res); setStatus('done');
@@ -208,7 +246,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                 setAiAnalyzing(true)
                 setAiProgress('准备 AI 分析...')
                 try {
-                    const summary = buildFileListSummary(res)
+                    const summary = await buildFileListSummary(res)
                     const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
                     setAnalysisResult(aiResult)
                 } catch (aiError) {
@@ -279,6 +317,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
         setStatus('done')
         setAnalysisResult(null)
         setDeletedPaths(new Set())
+        setActionFilter('all')
         
         // 标准模式：加载快照后自动进行 AI 分析
         if (isAdmin === false) {
@@ -287,7 +326,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
             
             const runAIAnalysis = async () => {
                 try {
-                    const summary = buildFileListSummary(loadedSnapshot.scanResult)
+                    const summary = await buildFileListSummary(loadedSnapshot.scanResult)
                     const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
                     setAnalysisResult(aiResult)
                 } catch (aiError) {
@@ -356,7 +395,21 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                             variant="outlined"
                             size="small"
                             startIcon={<Folder size={14} />}
-                            sx={{ borderRadius: '10px', px: 2, py: 0.9, color: 'secondary.main', textTransform: 'none', fontWeight: 600, fontSize: '12px' }}
+                            sx={{
+                                borderRadius: '10px',
+                                px: 2,
+                                py: 0.9,
+                                color: 'primary.main',
+                                borderColor: 'primary.main',
+                                textTransform: 'none',
+                                fontWeight: 600,
+                                fontSize: '12px',
+                                '&:hover': {
+                                    bgcolor: 'primary.main',
+                                    color: '#1A1A1A',
+                                    borderColor: 'primary.main',
+                                }
+                            }}
                         >
                             选择文件夹
                         </Button>
@@ -501,16 +554,27 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
 
             {/* AI 分析中状态（标准模式） */}
             {aiAnalyzing && (
-                <div className="bg-white dark:bg-gray-800 px-6 py-8 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm">
-                    <div className="flex flex-col items-center gap-4">
-                        <div className="relative">
-                            <Sparkles className="text-primary animate-pulse" size={40} />
-                            <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
-                        </div>
-                        <Typography variant="body1" sx={{ fontWeight: 600, color: 'text.primary' }} className="dark:text-gray-200">
+                <div className="p-10 flex flex-col items-center justify-center gap-4 animate-in zoom-in-95 duration-500">
+                    <div className="relative">
+                        <Sparkles className="text-primary animate-pulse" size={48} />
+                        <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
+                    </div>
+                    <div className="text-center">
+                        <Typography variant="body1" sx={{ fontWeight: 600, color: 'text.primary', mb: 1 }} className="dark:text-gray-200">
                             {aiProgress || 'AI 正在分析...'}
                         </Typography>
-                        <LinearProgress sx={{ width: '100%', borderRadius: 1 }} />
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>
+                            智能分析中
+                        </Typography>
+                    </div>
+                    <div className="flex gap-1 h-2">
+                        {Array.from({ length: 12 }).map((_, i) => (
+                            <div
+                                key={i}
+                                className="w-4 h-full bg-primary rounded-sm animate-pulse"
+                                style={{ animationDelay: `${i * 0.1}s`, animationDuration: '1.2s' }}
+                            />
+                        ))}
                     </div>
                 </div>
             )}
@@ -521,46 +585,283 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                     {/* 标准模式：显示 AI 建议列表 */}
                     {isAdmin === false ? (
                         analysisResult ? (
-                            <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-auto">
-                                {/* AI 分析摘要 */}
-                                <div className="bg-white dark:bg-gray-800 px-4 py-3 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
+                            <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
+                                {/* 左侧：饼图和摘要 */}
+                                <div className="w-80 flex flex-col gap-3 shrink-0">
+                                    {/* AI 分析摘要 */}
+                                    <div className="bg-white dark:bg-gray-800 px-4 py-3 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm">
+                                        <div className="flex items-center gap-2 mb-2">
                                             <Sparkles size={18} className="text-primary" />
                                             <span className="text-sm font-semibold text-slate-700 dark:text-gray-200">
-                                                {analysisResult.summary}
+                                                AI 分析结果
                                             </span>
                                         </div>
+                                        <p className="text-xs text-slate-600 dark:text-gray-400 leading-relaxed">
+                                            {analysisResult.summary}
+                                        </p>
                                         {analysisResult.tokenUsage && (
                                             <Tooltip title={`Prompt: ${analysisResult.tokenUsage.prompt_tokens} | Completion: ${analysisResult.tokenUsage.completion_tokens}`} arrow>
-                                                <span className="text-[10px] text-slate-400 dark:text-gray-500 font-mono">
+                                                <span className="text-[10px] text-slate-400 dark:text-gray-500 font-mono mt-2 inline-block">
                                                     Token: {analysisResult.tokenUsage.total_tokens}
                                                 </span>
                                             </Tooltip>
                                         )}
                                     </div>
+                                    
+                                    {/* 饼图：删除/迁移/保留占比 */}
+                                    {(() => {
+                                        const deleteSuggestions = analysisResult.suggestions.filter(s => s.action === 'delete' && !deletedPaths.has(s.path))
+                                        const moveSuggestions = analysisResult.suggestions.filter(s => s.action === 'move' && !deletedPaths.has(s.path))
+                                        
+                                        // 解析大小字符串为字节数
+                                        const parseSize = (sizeStr: string): number => {
+                                            const units: { [key: string]: number } = {
+                                                'B': 1,
+                                                'KB': 1024,
+                                                'MB': 1024 * 1024,
+                                                'GB': 1024 * 1024 * 1024,
+                                                'TB': 1024 * 1024 * 1024 * 1024,
+                                            }
+                                            const match = sizeStr.match(/^([\d.]+)\s*([A-Z]+)$/i)
+                                            if (!match) return 0
+                                            const value = parseFloat(match[1])
+                                            const unit = match[2].toUpperCase()
+                                            return value * (units[unit] || 1)
+                                        }
+                                        
+                                        const deleteSize = deleteSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
+                                        const moveSize = moveSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
+                                        const totalSize = result?.total_size || 1
+                                        const remainSize = Math.max(0, totalSize - deleteSize - moveSize)
+                                        const deletePercent = ((deleteSize / totalSize) * 100).toFixed(1)
+                                        const movePercent = ((moveSize / totalSize) * 100).toFixed(1)
+                                        const remainPercent = ((remainSize / totalSize) * 100).toFixed(1)
+                                        
+                                        // 三部分数据：删除、迁移、保留
+                                        const pieData = [
+                                            { name: '删除', value: deleteSize, count: deleteSuggestions.length, percent: deletePercent, action: 'delete' as const, color: '#ef4444' },
+                                            { name: '迁移', value: moveSize, count: moveSuggestions.length, percent: movePercent, action: 'move' as const, color: '#3b82f6' },
+                                            { name: '保留', value: remainSize, count: 0, percent: remainPercent, action: 'keep' as const, color: '#e2e8f0' },
+                                        ].filter(d => d.value > 0)
+                                        
+                                        // 自定义扇区渲染函数（带圆角和动画）
+                                        const renderActiveShape = (props: any) => {
+                                            const {
+                                                cx, cy, innerRadius, outerRadius, startAngle, endAngle,
+                                                fill, payload, index
+                                            } = props
+                                            
+                                            const isHovered = hoveredPieIndex === index
+                                            const isActive = actionFilter === payload.action
+                                            const isKeep = payload.action === 'keep'
+                                            
+                                            // 动态计算外半径
+                                            const dynamicOuterRadius = isHovered && !isKeep ? outerRadius + 10 : outerRadius
+                                            const dynamicInnerRadius = isHovered && !isKeep ? innerRadius - 2 : innerRadius
+                                            
+                                            // 计算透明度
+                                            const opacity = isKeep ? 0.35 : 
+                                                (actionFilter === 'all' || isActive ? 1 : 0.25)
+                                            
+                                            return (
+                                                <g>
+                                                    <Sector
+                                                        cx={cx}
+                                                        cy={cy}
+                                                        innerRadius={dynamicInnerRadius}
+                                                        outerRadius={dynamicOuterRadius}
+                                                        startAngle={startAngle}
+                                                        endAngle={endAngle}
+                                                        fill={fill}
+                                                        opacity={opacity}
+                                                        cornerRadius={pieData.length > 1 ? 6 : 0}
+                                                        style={{
+                                                            filter: isHovered && !isKeep 
+                                                                ? 'drop-shadow(0 6px 12px rgba(0,0,0,0.25))' 
+                                                                : 'none',
+                                                            cursor: isKeep ? 'default' : 'pointer',
+                                                            transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                        }}
+                                                    />
+                                                    {/* Hover 时的高亮描边 */}
+                                                    {isHovered && !isKeep && (
+                                                        <Sector
+                                                            cx={cx}
+                                                            cy={cy}
+                                                            innerRadius={dynamicInnerRadius - 2}
+                                                            outerRadius={dynamicOuterRadius + 2}
+                                                            startAngle={startAngle}
+                                                            endAngle={endAngle}
+                                                            fill="transparent"
+                                                            stroke={fill}
+                                                            strokeWidth={2}
+                                                            cornerRadius={pieData.length > 1 ? 8 : 0}
+                                                            opacity={0.5}
+                                                            style={{
+                                                                transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                            }}
+                                                        />
+                                                    )}
+                                                </g>
+                                            )
+                                        }
+                                        
+                                        return (
+                                            <div className="bg-white dark:bg-gray-800 px-4 py-6 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm flex flex-col items-center gap-3">
+                                                <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 self-start">建议操作</h3>
+                                                <div className="relative w-full" style={{ height: 200 }}>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <PieChart>
+                                                            <Pie
+                                                                data={pieData}
+                                                                cx="50%"
+                                                                cy="50%"
+                                                                innerRadius={45}
+                                                                outerRadius={65}
+                                                                paddingAngle={pieData.length > 1 ? 4 : 0}
+                                                                dataKey="value"
+                                                                activeIndex={pieData.map((_, i) => i)}
+                                                                activeShape={renderActiveShape}
+                                                                onClick={(_, index) => {
+                                                                    const clickedAction = pieData[index].action
+                                                                    if (clickedAction === 'keep') return
+                                                                    if (actionFilter === clickedAction) {
+                                                                        setActionFilter('all')
+                                                                    } else {
+                                                                        setActionFilter(clickedAction)
+                                                                    }
+                                                                }}
+                                                                onMouseEnter={(_, index) => setHoveredPieIndex(index)}
+                                                                onMouseLeave={() => setHoveredPieIndex(null)}
+                                                                animationBegin={0}
+                                                                animationDuration={800}
+                                                                animationEasing="ease-out"
+                                                            >
+                                                                {pieData.map((entry, index) => (
+                                                                    <Cell 
+                                                                        key={`cell-${index}`} 
+                                                                        fill={entry.color}
+                                                                    />
+                                                                ))}
+                                                            </Pie>
+                                                        </PieChart>
+                                                    </ResponsiveContainer>
+                                                    {/* 中心文字 */}
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                        <div className="text-center">
+                                                            <div 
+                                                                className="text-2xl font-bold text-slate-700 dark:text-gray-200"
+                                                                style={{
+                                                                    transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                                    transform: hoveredPieIndex !== null && pieData[hoveredPieIndex]?.action !== 'keep' 
+                                                                        ? 'scale(1.1)' 
+                                                                        : 'scale(1)',
+                                                                }}
+                                                            >
+                                                                {(parseFloat(deletePercent) + parseFloat(movePercent)).toFixed(1)}%
+                                                            </div>
+                                                            <div className="text-xs text-slate-500 dark:text-gray-400">可清理</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col gap-2 w-full">
+                                                    {pieData.filter(d => d.action !== 'keep').map((item, index) => (
+                                                        <button
+                                                            key={item.action}
+                                                            onClick={() => {
+                                                                if (actionFilter === item.action) {
+                                                                    setActionFilter('all')
+                                                                } else {
+                                                                    setActionFilter(item.action)
+                                                                }
+                                                            }}
+                                                            onMouseEnter={() => setHoveredPieIndex(index)}
+                                                            onMouseLeave={() => setHoveredPieIndex(null)}
+                                                            className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-300 ${
+                                                                actionFilter === 'all' || actionFilter === item.action
+                                                                    ? 'bg-slate-100 dark:bg-gray-700'
+                                                                    : 'bg-slate-50 dark:bg-gray-800/50 opacity-50'
+                                                            }`}
+                                                            style={{
+                                                                transform: hoveredPieIndex === index ? 'scale(1.02)' : 'scale(1)',
+                                                                boxShadow: hoveredPieIndex === index ? `0 4px 12px ${item.color}30` : 'none',
+                                                                transition: 'all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                                            }}
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <div 
+                                                                    className="w-3 h-3 rounded-full transition-transform duration-300"
+                                                                    style={{ 
+                                                                        backgroundColor: item.color,
+                                                                        transform: hoveredPieIndex === index ? 'scale(1.3)' : 'scale(1)',
+                                                                    }}
+                                                                ></div>
+                                                                <span className="text-sm font-medium text-slate-700 dark:text-gray-200">
+                                                                    {item.name}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex flex-col items-end">
+                                                                <span className="text-lg font-bold text-slate-700 dark:text-gray-200">
+                                                                    {item.percent}%
+                                                                </span>
+                                                                <span className="text-xs text-slate-500 dark:text-gray-400">
+                                                                    {item.count} 项 · {formatBytes(item.value)}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                    {/* 保留部分显示 */}
+                                                    {pieData.find(d => d.action === 'keep') && (
+                                                        <div className="flex items-center justify-between px-3 py-2 text-slate-400 dark:text-gray-500">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-slate-300 dark:bg-gray-600"></div>
+                                                                <span className="text-xs">保留</span>
+                                                            </div>
+                                                            <span className="text-xs">{remainPercent}%</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {actionFilter !== 'all' && (
+                                                    <button
+                                                        onClick={() => setActionFilter('all')}
+                                                        className="text-xs text-primary hover:underline mt-1 transition-all duration-200 hover:scale-105"
+                                                    >
+                                                        显示全部
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )
+                                    })()}
                                 </div>
 
-                                {/* 建议列表 */}
-                                {analysisResult.suggestions.length > 0 ? (
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                                        {analysisResult.suggestions
-                                            .filter(s => !deletedPaths.has(s.path))
-                                            .map((suggestion, idx) => (
-                                                <SuggestionCard
-                                                    key={idx}
-                                                    suggestion={suggestion}
-                                                    onDelete={handleDelete}
-                                                    onMove={handleMove}
-                                                />
-                                            ))}
-                                    </div>
-                                ) : (
-                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-gray-500">
-                                        <CheckCircle2 size={48} className="mb-2" />
-                                        <Typography variant="body2">暂无清理建议，磁盘空间使用良好</Typography>
-                                    </div>
-                                )}
+                                {/* 右侧：建议列表 */}
+                                <div className="flex-1 min-w-0 overflow-auto">
+                                    {analysisResult.suggestions.length > 0 ? (
+                                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 pr-2">
+                                            {analysisResult.suggestions
+                                                .filter(s => !deletedPaths.has(s.path))
+                                                .filter(s => actionFilter === 'all' || s.action === actionFilter)
+                                                .map((suggestion, idx) => (
+                                                    <SuggestionCard
+                                                        key={idx}
+                                                        suggestion={suggestion}
+                                                        onDelete={handleDelete}
+                                                        onMove={handleMove}
+                                                    />
+                                                ))}
+                                        </div>
+                                    ) : (
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-gray-500">
+                                            <CheckCircle2 size={48} className="mb-2" />
+                                            <Typography variant="body2">
+                                                {actionFilter === 'all' 
+                                                    ? '暂无清理建议，磁盘空间使用良好'
+                                                    : `暂无${actionFilter === 'delete' ? '删除' : '迁移'}建议`
+                                                }
+                                            </Typography>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         ) : null
                     ) : (
@@ -586,7 +887,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }:
                                     </div>
                                 ) : (
                                     <div className="absolute inset-0 overflow-auto">
-                                        <AIPromptPanel result={result} buildPrompt={buildFileListSummary} />
+                                        <AIPromptPanel result={result} />
                                     </div>
                                 )}
                             </div>

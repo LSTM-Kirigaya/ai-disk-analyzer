@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-shell'
 import { Settings, Github, Mail, ExternalLink, Sun, Moon, Monitor, FolderOpen } from 'lucide-react'
-import { ThemeProvider, createTheme, CssBaseline, IconButton, Box, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material'
+import { ThemeProvider, createTheme, CssBaseline, IconButton, Box, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, Button } from '@mui/material'
 import { ExpertMode } from './components/ExpertMode'
 import { AISettings } from './components/AISettings'
 import { SnapshotDialog } from './components/SnapshotDialog'
@@ -201,34 +201,71 @@ function App() {
           </Box>
         )}
 
+        {/* 左侧：应用名称 */}
         <div
           data-tauri-drag-region
           onMouseDown={handleTitleBarMouseDown}
-          className="flex-1 flex items-center px-4 h-full cursor-default"
+          className="flex items-center px-4 h-full cursor-default"
+          style={{ flex: '0 0 auto' }}
         >
           <span className={`text-sm font-semibold ${themeMode === 'dark' ? 'text-gray-100' : 'text-secondary'}`}>
             {language === 'zh' ? '磁盘菜鸟' : 'DiskRookie'}
           </span>
-          
-          {/* 快照按钮 */}
-          <Tooltip title="快照管理" arrow>
-            <IconButton
-              size="small"
-              onClick={() => setShowSnapshots(true)}
-              sx={{
-                ml: 2,
-                width: '28px',
-                height: '28px',
-                color: 'text.secondary',
-                '&:hover': {
-                  bgcolor: 'action.hover',
-                  color: 'primary.main',
-                },
-              }}
-            >
-              <FolderOpen className="w-4 h-4" />
-            </IconButton>
-          </Tooltip>
+        </div>
+        
+        {/* 中间：快照按钮（居中） */}
+        <div
+          data-tauri-drag-region
+          onMouseDown={handleTitleBarMouseDown}
+          className="flex-1 flex items-center justify-center h-full cursor-default px-4"
+        >
+          <Button
+            onClick={() => setShowSnapshots(true)}
+            sx={(theme) => ({
+              minWidth: '280px',
+              maxWidth: '400px',
+              height: '28px',
+              px: 1.5,
+              py: 0.5,
+              textTransform: 'none',
+              borderRadius: '6px',
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: theme.palette.mode === 'dark' 
+                ? 'rgba(30, 30, 30, 0.5)' 
+                : 'rgba(255, 255, 255, 0.5)',
+              backdropFilter: 'blur(8px)',
+              color: 'text.secondary',
+              fontSize: '12px',
+              fontWeight: 500,
+              justifyContent: 'center',
+              '&:hover': {
+                bgcolor: theme.palette.mode === 'dark'
+                  ? 'rgba(40, 40, 40, 0.7)'
+                  : 'rgba(255, 255, 255, 0.7)',
+                borderColor: 'primary.main',
+                color: 'primary.main',
+              },
+            })}
+          >
+            {loadedSnapshot ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, lineHeight: 1.2 }}>
+                  {loadedSnapshot.name}
+                </span>
+                <span style={{ fontSize: '9px', opacity: 0.6, lineHeight: 1.2 }}>
+                  {new Date(loadedSnapshot.timestamp).toLocaleString('zh-CN', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              </Box>
+            ) : (
+              '快照管理'
+            )}
+          </Button>
         </div>
         
         {/* 项目信息链接 */}
