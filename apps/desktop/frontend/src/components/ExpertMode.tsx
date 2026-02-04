@@ -2,13 +2,15 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles } from 'lucide-react'
-import { Button, TextField, Typography, Fade, Tooltip, LinearProgress } from '@mui/material'
+import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save } from 'lucide-react'
+import { Button, TextField, Typography, Fade, Tooltip, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
 import { Treemap, type TreemapNode } from './Treemap'
 import { formatBytes, formatDuration } from '../utils/format'
 import { loadSettings } from '../services/ai'
 import { analyzeWithAI, deleteItem, type AnalysisResult } from '../services/ai-analysis'
 import { SuggestionCard } from './SuggestionCard'
+import { saveSnapshot, type Snapshot } from '../services/snapshot'
+import { readStorageFile, writeStorageFile } from '../services/storage'
 
 interface ScanResult {
     root: TreemapNode
@@ -17,18 +19,19 @@ interface ScanResult {
     total_size: number
 }
 
-const PROMPT_INSTRUCTION_KEY = 'ai-disk-analyzer-prompt-instruction'
+const PROMPT_INSTRUCTION_FILE = 'prompt-instruction.txt'
+const DEFAULT_PROMPT_INSTRUCTION = '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
 
-function loadPromptInstruction(): string {
+async function loadPromptInstruction(): Promise<string> {
     try {
-        const stored = localStorage.getItem(PROMPT_INSTRUCTION_KEY)
-        return stored || '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。'
-    } catch { return '请根据以上占用，简要指出可安全清理或迁移的大项，并给出 1～3 条操作建议。' }
+        const stored = await readStorageFile(PROMPT_INSTRUCTION_FILE)
+        return stored || DEFAULT_PROMPT_INSTRUCTION
+    } catch { return DEFAULT_PROMPT_INSTRUCTION }
 }
 
-function savePromptInstruction(instruction: string): void {
+async function savePromptInstruction(instruction: string): Promise<void> {
     try {
-        localStorage.setItem(PROMPT_INSTRUCTION_KEY, instruction)
+        await writeStorageFile(PROMPT_INSTRUCTION_FILE, instruction)
     } catch {
         // ignore storage errors
     }
@@ -37,10 +40,16 @@ function savePromptInstruction(instruction: string): void {
 /** AI 提示面板 */
 function AIPromptPanel({ result, buildPrompt }: { result: ScanResult; buildPrompt: (r: ScanResult) => string }) {
     const fileListSummary = useMemo(() => buildPrompt(result), [result, buildPrompt])
-    const [instruction, setInstruction] = useState(loadPromptInstruction())
+    const [instruction, setInstruction] = useState(DEFAULT_PROMPT_INSTRUCTION)
     const [copied, setCopied] = useState(false)
     
-    useEffect(() => { savePromptInstruction(instruction) }, [instruction])
+    useEffect(() => {
+        loadPromptInstruction().then(setInstruction)
+    }, [])
+    
+    useEffect(() => { 
+        void savePromptInstruction(instruction) 
+    }, [instruction])
     
     const copy = useCallback(() => {
         const fullPrompt = fileListSummary + '\n' + instruction
@@ -136,7 +145,13 @@ function buildFileListSummary(result: ScanResult): string {
     return `[磁盘分析结果]\n总大小: ${formatBytes(result.total_size)}，文件数: ${result.file_count}\n\n${header}${rows}`
 }
 
-export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) {
+interface ExpertModeProps {
+    onOpenSettings?: () => void
+    loadedSnapshot?: Snapshot | null
+    onSnapshotLoaded?: () => void
+}
+
+export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded }: ExpertModeProps) {
     const [path, setPath] = useState('')
     const [status, setStatus] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
     const [errorMsg, setErrorMsg] = useState('')
@@ -153,6 +168,10 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
     const [aiProgress, setAiProgress] = useState('')
     const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
     const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set())
+    
+    // 快照保存对话框
+    const [showSaveDialog, setShowSaveDialog] = useState(false)
+    const [snapshotName, setSnapshotName] = useState('')
 
     // 核心：权限检查
     const checkAdmin = useCallback(async () => {
@@ -217,13 +236,85 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
         setDeletedPaths(prev => new Set([...prev, itemPath]))
     }, [])
 
-    const handleMove = useCallback(async (_itemPath: string) => {
+    const handleMove = useCallback(async (itemPath: string) => {
         // 预留迁移接口
+        void itemPath
         throw new Error('迁移功能正在开发中')
     }, [])
+    
+    // 保存快照
+    const handleSaveSnapshot = useCallback(() => {
+        if (!result || !path) return
+        
+        // 默认快照名称：路径的最后一部分 + 时间
+        const pathParts = path.split(/[/\\]/).filter(Boolean)
+        const defaultName = `${pathParts[pathParts.length - 1] || '未命名'} - ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+        setSnapshotName(defaultName)
+        setShowSaveDialog(true)
+    }, [result, path])
+    
+    const handleConfirmSaveSnapshot = useCallback(async () => {
+        if (!result || !path || !snapshotName.trim()) return
+        
+        try {
+            await saveSnapshot({
+                name: snapshotName.trim(),
+                path,
+                scanResult: result,
+            })
+            setShowSaveDialog(false)
+            setSnapshotName('')
+            alert('快照保存成功！')
+        } catch (e) {
+            alert(`保存失败：${e}`)
+        }
+    }, [result, path, snapshotName])
+    
+    // 加载快照
+    useEffect(() => {
+        if (!loadedSnapshot) return
+        
+        setPath(loadedSnapshot.path)
+        setResult(loadedSnapshot.scanResult)
+        setStatus('done')
+        setAnalysisResult(null)
+        setDeletedPaths(new Set())
+        
+        // 标准模式：加载快照后自动进行 AI 分析
+        if (isAdmin === false) {
+            setAiAnalyzing(true)
+            setAiProgress('准备 AI 分析...')
+            
+            const runAIAnalysis = async () => {
+                try {
+                    const summary = buildFileListSummary(loadedSnapshot.scanResult)
+                    const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
+                    setAnalysisResult(aiResult)
+                } catch (aiError) {
+                    setErrorMsg(`AI 分析失败: ${aiError}`)
+                } finally {
+                    setAiAnalyzing(false)
+                    setAiProgress('')
+                }
+            }
+            
+            void runAIAnalysis()
+        }
+        
+        // 清除已加载的快照
+        onSnapshotLoaded?.()
+    }, [loadedSnapshot, isAdmin, onSnapshotLoaded])
 
     // 核心：API 配置校验
-    const standardModeNoApi = isAdmin === false && !loadSettings().apiKey?.trim()
+    const [standardModeNoApi, setStandardModeNoApi] = useState(false)
+
+    useEffect(() => {
+        if (isAdmin === false) {
+            loadSettings().then(settings => {
+                setStandardModeNoApi(!settings.apiKey?.trim())
+            })
+        }
+    }, [isAdmin])
 
     useEffect(() => {
         if (isAdmin === false && onOpenSettings && !openedSettingsForStandardRef.current && standardModeNoApi) {
@@ -265,7 +356,7 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
                             variant="outlined"
                             size="small"
                             startIcon={<Folder size={14} />}
-                            sx={{ borderRadius: '10px', px: 2, py: 0.9, borderColor: '#D1D5DB', color: 'secondary.main', textTransform: 'none', fontWeight: 600, fontSize: '12px' }}
+                            sx={{ borderRadius: '10px', px: 2, py: 0.9, color: 'secondary.main', textTransform: 'none', fontWeight: 600, fontSize: '12px' }}
                         >
                             选择文件夹
                         </Button>
@@ -275,13 +366,40 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
                             variant="contained"
                             size="small"
                             sx={{
-                                borderRadius: '10px', px: 3, py: 0.9, bgcolor: 'primary.main', color: 'secondary.main',
+                                borderRadius: '10px', px: 3, py: 0.9, bgcolor: 'primary.main', color: '#1A1A1A',
                                 fontWeight: 700, fontSize: '12px', textTransform: 'none', boxShadow: 'none',
-                                '&:hover': { bgcolor: 'primary.dark' }
+                                '&:hover': { bgcolor: 'primary.dark', color: '#1A1A1A' }
                             }}
                         >
                             {status === 'scanning' ? '分析中...' : '开始扫描'}
                         </Button>
+                        {result && status === 'done' && (
+                            <Tooltip title="保存快照" arrow>
+                                <Button
+                                    onClick={handleSaveSnapshot}
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<Save size={14} />}
+                                    sx={{
+                                        borderRadius: '10px',
+                                        px: 2,
+                                        py: 0.9,
+                                        color: 'primary.main',
+                                        borderColor: 'primary.main',
+                                        textTransform: 'none',
+                                        fontWeight: 600,
+                                        fontSize: '12px',
+                                        '&:hover': {
+                                            bgcolor: 'primary.main',
+                                            color: '#1A1A1A',
+                                            borderColor: 'primary.main',
+                                        }
+                                    }}
+                                >
+                                    保存快照
+                                </Button>
+                            </Tooltip>
+                        )}
                     </div>
                 </div>
 
@@ -313,7 +431,7 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
                     </div>
                     {result && (() => {
                         const stats = [
-                            { label: '处理时耗', val: formatDuration(result.scan_time_ms), Icon: Clock },
+                            { label: '处理耗时', val: formatDuration(result.scan_time_ms), Icon: Clock },
                             { label: '文件总计', val: result.file_count.toLocaleString(), Icon: FileStack },
                             { label: '占用空间', val: formatBytes(result.total_size), Icon: HardDrive }
                         ]
@@ -325,7 +443,7 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
                                         <span key={label} className="flex items-center gap-2">
                                             {idx > 0 && <div className="w-px h-5 bg-slate-200 dark:bg-gray-600 shrink-0" aria-hidden />}
                                             <Icon size={14} className="text-slate-400 dark:text-gray-400 shrink-0" />
-                                            <span className="text-[11px] font-semibold text-secondary tabular-nums">{val}</span>
+                                            <span className="text-[11px] dark:text-gray-300 font-semibold text-secondary tabular-nums">{val}</span>
                                         </span>
                                     ))}
                                 </div>
@@ -492,6 +610,70 @@ export function ExpertMode({ onOpenSettings }: { onOpenSettings?: () => void }) 
                     <p className="mt-2 text-xs text-slate-400 dark:text-gray-500">分析磁盘占用</p>
                 </div>
             )}
+            
+            {/* 保存快照对话框 */}
+            <Dialog
+                open={showSaveDialog}
+                onClose={() => setShowSaveDialog(false)}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: { borderRadius: '16px' }
+                }}
+            >
+                <DialogTitle sx={{ pb: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Save size={20} />
+                        保存快照
+                    </Typography>
+                </DialogTitle>
+                <DialogContent>
+                    <TextField
+                        autoFocus
+                        fullWidth
+                        label="快照名称"
+                        value={snapshotName}
+                        onChange={(e) => setSnapshotName(e.target.value)}
+                        placeholder="为这个快照起个名字..."
+                        sx={{
+                            mt: 1,
+                            '& .MuiOutlinedInput-root': {
+                                borderRadius: '12px',
+                            }
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && snapshotName.trim()) {
+                                handleConfirmSaveSnapshot()
+                            }
+                        }}
+                    />
+                    <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'text.secondary' }}>
+                        快照将保存扫描结果，不包含 AI 分析内容
+                    </Typography>
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2.5 }}>
+                    <Button
+                        onClick={() => setShowSaveDialog(false)}
+                        sx={{ borderRadius: '10px', textTransform: 'none' }}
+                    >
+                        取消
+                    </Button>
+                    <Button
+                        onClick={handleConfirmSaveSnapshot}
+                        variant="contained"
+                        disabled={!snapshotName.trim()}
+                        sx={{
+                            borderRadius: '10px',
+                            textTransform: 'none',
+                            bgcolor: 'primary.main',
+                            color: '#1A1A1A',
+                            '&:hover': { bgcolor: 'primary.dark', color: '#1A1A1A' }
+                        }}
+                    >
+                        保存
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </div>
     );
 }

@@ -4,3 +4,4 @@ pub mod plan;
 pub mod execute;
 pub mod permission;
 pub mod delete;
+pub mod storage;

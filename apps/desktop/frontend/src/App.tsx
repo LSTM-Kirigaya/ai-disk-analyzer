@@ -1,34 +1,73 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-shell'
-import { Settings, Github, Mail, ExternalLink, Sun, Moon } from 'lucide-react'
-import { ThemeProvider, createTheme, CssBaseline, Button, IconButton, Box, Tooltip } from '@mui/material'
+import { Settings, Github, Mail, ExternalLink, Sun, Moon, Monitor, FolderOpen } from 'lucide-react'
+import { ThemeProvider, createTheme, CssBaseline, IconButton, Box, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material'
 import { ExpertMode } from './components/ExpertMode'
 import { AISettings } from './components/AISettings'
-import { AIChat } from './components/AIChat'
+import { SnapshotDialog } from './components/SnapshotDialog'
+import type { Snapshot } from './services/snapshot'
+import { readStorageFile, writeStorageFile } from './services/storage'
 
-const THEME_STORAGE_KEY = 'ai-disk-analyzer-theme'
+const THEME_STORAGE_FILE = 'theme.txt'
 
 function App() {
   const win = getCurrentWindow()
   const [showSettings, setShowSettings] = useState(false)
-  const [showChat, setShowChat] = useState(false)
+  const [showSnapshots, setShowSnapshots] = useState(false)
+  const [loadedSnapshot, setLoadedSnapshot] = useState<Snapshot | null>(null)
   const [platform, setPlatform] = useState<'macos' | 'windows' | 'linux'>('windows')
-  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
-    try {
-      const stored = localStorage.getItem(THEME_STORAGE_KEY) as 'light' | 'dark' | null
-      return stored === 'dark' || stored === 'light' ? stored : 'light'
-    } catch {
-      return 'light'
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system')
+  const [themeMenuAnchor, setThemeMenuAnchor] = useState<null | HTMLElement>(null)
+  const [language, setLanguage] = useState<string>('en')
+
+  // 检测系统主题
+  const systemTheme = useMemo(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
     }
-  })
+    return 'light'
+  }, [])
+
+  // 计算实际使用的主题
+  const themeMode = themePreference === 'system' ? systemTheme : themePreference
+
+  // 监听系统主题变化
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+      const handler = () => {
+        if (themePreference === 'system') {
+          document.documentElement.classList.toggle('dark', mediaQuery.matches)
+        }
+      }
+      mediaQuery.addEventListener('change', handler)
+      return () => mediaQuery.removeEventListener('change', handler)
+    }
+  }, [themePreference])
+
+  // 加载主题设置
+  useEffect(() => {
+    readStorageFile(THEME_STORAGE_FILE).then(stored => {
+      if (stored === 'dark' || stored === 'light' || stored === 'system') {
+        setThemePreference(stored)
+      }
+    })
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', themeMode === 'dark')
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, themeMode)
-    } catch {}
-  }, [themeMode])
+    void writeStorageFile(THEME_STORAGE_FILE, themePreference)
+  }, [themeMode, themePreference])
+
+  // 检测语言
+  useEffect(() => {
+    const detectLanguage = () => {
+      const browserLang = navigator.language.toLowerCase()
+      setLanguage(browserLang.startsWith('zh') ? 'zh' : 'en')
+    }
+    detectLanguage()
+  }, [])
 
   const theme = useMemo(() => createTheme({
     palette: {
@@ -167,7 +206,29 @@ function App() {
           onMouseDown={handleTitleBarMouseDown}
           className="flex-1 flex items-center px-4 h-full cursor-default"
         >
-          <span className={`text-sm font-semibold ${themeMode === 'dark' ? 'text-gray-100' : 'text-secondary'}`}>AI Disk Analyzer</span>
+          <span className={`text-sm font-semibold ${themeMode === 'dark' ? 'text-gray-100' : 'text-secondary'}`}>
+            {language === 'zh' ? '磁盘菜鸟' : 'DiskRookie'}
+          </span>
+          
+          {/* 快照按钮 */}
+          <Tooltip title="快照管理" arrow>
+            <IconButton
+              size="small"
+              onClick={() => setShowSnapshots(true)}
+              sx={{
+                ml: 2,
+                width: '28px',
+                height: '28px',
+                color: 'text.secondary',
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                  color: 'primary.main',
+                },
+              }}
+            >
+              <FolderOpen className="w-4 h-4" />
+            </IconButton>
+          </Tooltip>
         </div>
         
         {/* 项目信息链接 */}
@@ -227,29 +288,10 @@ function App() {
         
         {/* 功能按钮 */}
         <div className="flex items-center h-full px-2 gap-1">
-          <Button
-            variant={showChat ? "contained" : "text"}
-            size="small"
-            onClick={() => setShowChat(!showChat)}
-            sx={{
-              minWidth: 'auto',
-              height: '28px',
-              px: 1.5,
-              fontSize: '12px',
-              textTransform: 'none',
-              bgcolor: showChat ? 'primary.main' : 'transparent',
-              color: showChat ? 'secondary.main' : 'text.secondary',
-              '&:hover': {
-                bgcolor: showChat ? 'primary.dark' : 'action.hover',
-              },
-            }}
-          >
-            AI 助手
-          </Button>
-          <Tooltip title={themeMode === 'dark' ? '浅色模式' : '深色模式'} arrow>
+          <Tooltip title="主题设置" arrow>
             <IconButton
               size="small"
-              onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+              onClick={(e) => setThemeMenuAnchor(e.currentTarget)}
               sx={{
                 width: '28px',
                 height: '28px',
@@ -259,9 +301,65 @@ function App() {
                 },
               }}
             >
-              {themeMode === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {themePreference === 'system' ? (
+                <Monitor className="w-4 h-4" />
+              ) : themeMode === 'dark' ? (
+                <Moon className="w-4 h-4" />
+              ) : (
+                <Sun className="w-4 h-4" />
+              )}
             </IconButton>
           </Tooltip>
+          <Menu
+            anchorEl={themeMenuAnchor}
+            open={Boolean(themeMenuAnchor)}
+            onClose={() => setThemeMenuAnchor(null)}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+          >
+            <MenuItem
+              selected={themePreference === 'light'}
+              onClick={() => {
+                setThemePreference('light')
+                setThemeMenuAnchor(null)
+              }}
+            >
+              <ListItemIcon>
+                <Sun className="w-4 h-4" />
+              </ListItemIcon>
+              <ListItemText>浅色</ListItemText>
+            </MenuItem>
+            <MenuItem
+              selected={themePreference === 'dark'}
+              onClick={() => {
+                setThemePreference('dark')
+                setThemeMenuAnchor(null)
+              }}
+            >
+              <ListItemIcon>
+                <Moon className="w-4 h-4" />
+              </ListItemIcon>
+              <ListItemText>深色</ListItemText>
+            </MenuItem>
+            <MenuItem
+              selected={themePreference === 'system'}
+              onClick={() => {
+                setThemePreference('system')
+                setThemeMenuAnchor(null)
+              }}
+            >
+              <ListItemIcon>
+                <Monitor className="w-4 h-4" />
+              </ListItemIcon>
+              <ListItemText>跟随系统</ListItemText>
+            </MenuItem>
+          </Menu>
           <IconButton
             size="small"
             onClick={() => setShowSettings(true)}
@@ -338,19 +436,23 @@ function App() {
       {/* 主内容区 */}
       <div className="flex-1 flex overflow-hidden">
         <main className={`flex-1 flex flex-col min-h-0 overflow-y-auto p-4 ${themeMode === 'dark' ? 'bg-gray-800' : 'bg-surface'}`}>
-          <ExpertMode onOpenSettings={() => setShowSettings(true)} />
+          <ExpertMode 
+            onOpenSettings={() => setShowSettings(true)} 
+            loadedSnapshot={loadedSnapshot}
+            onSnapshotLoaded={() => setLoadedSnapshot(null)}
+          />
         </main>
-        
-        {/* AI 聊天侧边栏 */}
-        {showChat && (
-          <aside className={`w-96 border-l flex flex-col ${themeMode === 'dark' ? 'border-gray-700 bg-gray-900' : 'border-border bg-white'}`}>
-            <AIChat />
-          </aside>
-        )}
       </div>
 
       {/* 设置弹窗 */}
       {showSettings && <AISettings onClose={() => setShowSettings(false)} />}
+      
+      {/* 快照管理对话框 */}
+      <SnapshotDialog 
+        open={showSnapshots} 
+        onClose={() => setShowSnapshots(false)}
+        onLoadSnapshot={(snapshot) => setLoadedSnapshot(snapshot)}
+      />
       </div>
     </ThemeProvider>
   )

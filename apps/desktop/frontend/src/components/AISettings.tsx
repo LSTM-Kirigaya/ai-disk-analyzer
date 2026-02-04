@@ -8,7 +8,6 @@ import {
   IconButton,
   InputAdornment,
   FormControl,
-  InputLabel,
   FormHelperText,
   Box,
   Typography,
@@ -44,20 +43,21 @@ export function AISettings({ onClose }: Props) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
 
   useEffect(() => {
-    const loaded = loadSettings()
-    setSettings(loaded)
-    
-    // 检查是否是自定义 URL
-    const urlPreset = API_URL_PRESETS.find(p => p.value === loaded.apiUrl)
-    if (!urlPreset) {
-      setCustomUrl(loaded.apiUrl)
-    }
-    
-    // 检查是否是自定义模型
-    const modelPreset = MODEL_PRESETS.find(p => p.value === loaded.model)
-    if (!modelPreset) {
-      setCustomModel(loaded.model)
-    }
+    loadSettings().then(loaded => {
+      setSettings(loaded)
+      
+      // 检查是否是自定义 URL
+      const urlPreset = API_URL_PRESETS.find(p => p.value === loaded.apiUrl)
+      if (!urlPreset) {
+        setCustomUrl(loaded.apiUrl)
+      }
+      
+      // 检查是否是自定义模型
+      const modelPreset = MODEL_PRESETS.find(p => p.value === loaded.model)
+      if (!modelPreset) {
+        setCustomModel(loaded.model)
+      }
+    })
   }, [])
 
   // 当 API Key 和 URL 都填写后，自动获取模型列表；加载完成后默认选中第一个模型
@@ -89,14 +89,18 @@ export function AISettings({ onClose }: Props) {
     return () => clearTimeout(timer)
   }, [settings.apiKey, settings.apiUrl])
 
-  const handleSave = () => {
-    saveSettings(settings)
-    setSaved(true)
-    // 保存成功后短暂显示「已保存」再自动关闭对话框
-    setTimeout(() => {
-      setSaved(false)
-      onClose()
-    }, 400)
+  const handleSave = async () => {
+    try {
+      await saveSettings(settings)
+      setSaved(true)
+      // 保存成功后短暂显示「已保存」再自动关闭对话框
+      setTimeout(() => {
+        setSaved(false)
+        onClose()
+      }, 400)
+    } catch (error) {
+      alert(`保存设置失败: ${error}`)
+    }
   }
 
   const handleUrlChange = (value: string) => {
@@ -127,7 +131,7 @@ export function AISettings({ onClose }: Props) {
         <div className="flex items-center justify-between p-4 border-b border-border dark:border-gray-600">
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 bg-primary rounded"></div>
-            <h2 className="text-lg font-semibold text-secondary dark:text-gray-100">AI 设置</h2>
+            <h2 className="text-lg font-semibold text-secondary dark:text-gray-100">设置</h2>
           </div>
           <IconButton
             onClick={onClose}

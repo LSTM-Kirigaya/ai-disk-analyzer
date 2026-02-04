@@ -133,7 +133,7 @@ def main(radius=20, scale=1.0):
     project_root = script_dir.parent.parent
     
     # 输入文件
-    input_png = script_dir / "new_icon.png"
+    input_png = script_dir / "new_icon2.png"
     
     if not input_png.exists():
         print(f"❌ 错误: 找不到输入文件 {input_png}")
@@ -188,7 +188,7 @@ if __name__ == "__main__":
         # 执行完整流程
         script_dir = Path(__file__).parent
         project_root = script_dir.parent.parent
-        input_png = script_dir / "new_icon.png"
+        input_png = script_dir / "new_icon2.png"
         desktop_dir = project_root / "apps" / "desktop"
         png_output = desktop_dir / "app-icon.png"
         

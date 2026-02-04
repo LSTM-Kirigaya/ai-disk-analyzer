@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AI Disk Analyzer",
+  "productName": "DiskRookie 磁盘菜鸟",
   "version": "0.1.0",
   "identifier": "com.ai-disk-analyzer.desktop",
   "build": {
@@ -10,6 +10,7 @@
     "frontendDist": "../frontend/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "AI 磁盘分析工具",
@@ -18,7 +19,8 @@
         "minWidth": 800,
         "minHeight": 600,
         "decorations": false,
-        "transparent": true
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

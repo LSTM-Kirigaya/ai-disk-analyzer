@@ -1,87 +1,111 @@
-![应用图标](apps/desktop/app-icon.png)
+<div align="center">
+  <img src="apps/desktop/app-icon.png" width="128" height="128" alt="AI Disk Analyzer Logo" />
 
-# AI 磁盘分析工具 (AI Disk Analyzer)
+  # DiskRookie 磁盘菜鸟
 
-基于 AI 的智能磁盘分析与整理工具，帮助用户快速整理磁盘上的无用文件，对冷数据提供迁移方案与建议。
+  <p align="center">
+    <img src="https://img.shields.io/badge/Rust-1.86+-orange?style=flat-square&logo=rust" alt="Rust Version" />
+    <img src="https://img.shields.io/badge/Node.js-20+-green?style=flat-square&logo=node.js" alt="Node Version" />
+    <img src="https://img.shields.io/badge/Tauri-Latest-blue?style=flat-square&logo=tauri" alt="Tauri" />
+    <img src="https://img.shields.io/badge/License-Apache%202.0-red?style=flat-square" alt="License" />
+  </p>
 
-## 项目架构
+  让傻子用户也能像电脑糕手一样清理磁盘。
 
-```
+  [快速开始](#快速开始) • [项目架构](#项目架构) • [开发计划](#开发计划) • [贡献指南](#贡献指南)
+</div>
+
+---
+
+## ✨ 核心特性
+
+- 🤖 **AI 驱动分析**：不仅仅是统计大小，更懂文件的用途与价值。
+- 🚀 **高性能扫描**：基于 Rust 核心，极速遍历千万级文件。
+- 🎨 **工业级 UI**：基于 TailwindCSS 打造的现代化、沉浸式交互体验。
+- 🛡️ **安全迁移**：所有 AI 建议均需用户确认，确保数据安全。
+
+## 🏗️ 项目架构
+
+项目采用 **Rust Workspace** 管理的多包架构，结构清晰，逻辑解耦：
+
+```text
 ai-disk-analyzer/
-├── apps/
-│   ├── desktop/                 # GUI App（Tauri）
-│   │   ├── app-icon.png         # 应用图标（1024x1024，带圆角）
-│   │   ├── src-tauri/           # Rust 后端
-│   │   │   ├── src/
-│   │   │   │   ├── commands/    # GUI ↔ Core 桥接
-│   │   │   │   ├── main.rs
-│   │   │   │   └── lib.rs
-│   │   │   ├── icons/           # 多平台图标文件（自动生成）
-│   │   │   └── Cargo.toml
-│   │   └── frontend/            # React + Vite + TailwindCSS
-│   └── images/                  # 图标资源
-│       ├── new_icon.png         # 原始图标设计
-│       └── generate_rounded_icon.py  # 图标生成脚本
-├── crates/
-│   ├── disk-scanner/            # 磁盘扫描层
-│   ├── domain-model/            # 核心领域模型
-│   ├── ai-engine/               # AI 推理与规划层
-│   ├── executor/                # 执行层
-│   └── common/                  # 公共模块
-├── docs/
-│   └── ui-spec.md               # UI 设计规范（工业集成风格）
-├── Cargo.toml                   # Workspace
-└── README.md
+├── 📱 apps/
+│   ├── desktop/                # GUI App (Tauri)
+│   │   ├── src-tauri/          # Rust 桌面端后端
+│   │   └── frontend/           # React + Vite + TailwindCSS
+│   └── images/                 # 资源文件与图标处理脚本
+├── 📦 crates/
+│   ├── disk-scanner/           # 🚀 极速磁盘扫描引擎
+│   ├── domain-model/           # 核心领域实体模型
+│   ├── ai-engine/              # 🧠 AI 推理与决策层
+│   ├── executor/               # 文件操作安全执行层
+│   └── common/                 # 工具类与公共模块
+└── 📝 docs/                    # UI 设计规范与技术文档
+
 ```
 
-## 快速开始
+---
 
-### 环境要求
+## 🚀 快速开始
 
-- Rust (rustc 1.86+)
-- Node.js 20+
-- 系统：Windows / macOS / Linux
+### 🛠️ 环境准备
 
-### 开发
+确保你的开发环境已安装以下工具：
+
+* **Rust**: `rustc 1.86+`
+* **Node.js**: `v20+`
+* **包管理器**: `npm` 或 `pnpm`
+
+### 🖥️ 开发调试
 
 ```bash
-# 安装依赖
-cd apps/desktop
-npm install
+# 1. 克隆项目
+git clone [https://github.com/your-username/ai-disk-analyzer.git](https://github.com/your-username/ai-disk-analyzer.git)
+cd ai-disk-analyzer/apps/desktop
+
+# 2. 安装前端依赖
 cd frontend && npm install && cd ..
 
-# 启动开发模式（会启动前端 dev server 并打开 GUI）
+# 3. 启动开发模式 (自动开启 Rust 后端与 React 前端)
 npm run dev
+
 ```
 
-### 构建
+### 📦 构建发布
 
 ```bash
 cd apps/desktop
 npm run build
+
 ```
 
-### 运行测试
+---
 
-```bash
-# 运行 disk-scanner 核心功能测试
-cargo test -p ai-disk-scanner
-```
+## 📅 开发计划 (Roadmap)
 
-## 开发计划
+* [x] 核心 Rust 扫描引擎开发
+* [ ] **Phase 1**: 支持更多复杂文件类型深度识别 (Office/CAD/临时缓存)
+* [ ] **Phase 2**: 增加文件内容实时预览功能
+* [ ] **Phase 3**: AI 自定义清理规则（自然语言配置）
+* [ ] **Phase 4**: 多语言 i18n 支持与跨平台分发优化
 
-- [ ] 支持更多文件类型识别
-- [ ] 增加文件预览功能
-- [ ] 支持自定义清理规则
-- [ ] 多语言支持
-- [ ] 云端同步清理历史
+---
 
-## 贡献指南
+## 🤝 贡献指南
 
-欢迎提交 Issue 和 Pull Request！
+我们非常欢迎 Issue 和 Pull Request！
 
-## 许可证
+1. Fork 本仓库
+2. 创建你的特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交你的改动 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启一个 Pull Request
 
-本项目采用 [Apache License 2.0](LICENSE) 许可证。
+---
 
-Copyright 2025 AI Disk Analyzer Contributors
+## 📄 许可证
+
+本项目采用 [Apache License 2.0](https://www.google.com/search?q=LICENSE) 许可证。
+
+Copyright © 2026 **AI Disk Analyzer Contributors**.

@@ -13,29 +13,21 @@ html {
   background: transparent;
 }
 
-html.dark {
-  background: #0f172a;
-}
-
-html.dark body {
-  background: #0f172a;
-  color: #e2e8f0;
-}
 
 body {
   @apply text-text-main antialiased font-sans;
   margin: 0;
   min-height: 100vh;
   overflow: hidden;
-  background: transparent;
+  background: transparent !important;
 }
 
 #root {
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   height: 100vh;
   background: white;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 2px solid rgba(0, 0, 0, 0.12);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 

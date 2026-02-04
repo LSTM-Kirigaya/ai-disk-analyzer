@@ -110,7 +110,7 @@ export async function analyzeWithAI(
   diskSummary: string,
   onProgress?: (msg: string) => void
 ): Promise<AnalysisResult> {
-  const settings = loadSettings()
+  const settings = await loadSettings()
   
   if (!settings.apiKey) {
     throw new Error('请先在设置中配置 API Key')
@@ -236,7 +236,7 @@ export async function deleteItem(path: string): Promise<void> {
 }
 
 // 预留：迁移文件/目录（后续接入网盘）
-export async function moveItem(path: string, destination: string): Promise<void> {
+export async function moveItem(_path: string, _destination: string): Promise<void> {
   // TODO: 实现迁移逻辑
   throw new Error('迁移功能正在开发中，敬请期待')
 }

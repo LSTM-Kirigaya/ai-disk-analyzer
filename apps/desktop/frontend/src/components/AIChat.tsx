@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Send, Loader2, Trash2, AlertCircle } from 'lucide-react'
-import { Button, IconButton, TextField, Alert, Box } from '@mui/material'
+import { IconButton, TextField, Alert, Box } from '@mui/material'
 import {
   loadSettings,
   sendChatRequest,
@@ -45,7 +45,7 @@ export function AIChat() {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
 
-    const settings = loadSettings()
+    const settings = await loadSettings()
     if (!settings.apiKey) {
       setError('请先在设置中配置 API Key')
       return

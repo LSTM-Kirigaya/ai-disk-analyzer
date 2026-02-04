@@ -1,5 +1,7 @@
 // AI 服务层 - OpenAI 兼容协议
 
+import { readJSON, writeJSON, readStorageFile, writeStorageFile } from './storage'
+
 export interface AISettings {
   apiUrl: string
   apiKey: string
@@ -88,29 +90,28 @@ export const API_URL_PRESETS = [
   { label: '自定义', value: 'custom' },
 ]
 
-const STORAGE_KEY = 'ai-disk-analyzer-settings'
+const SETTINGS_FILE = 'settings.json'
+const SYSTEM_PROMPT_FILE = 'system-prompt.txt'
 
 // 加载设置
-export function loadSettings(): AISettings {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      return { ...DEFAULT_SETTINGS, ...parsed }
-    }
-  } catch (e) {
-    console.error('Failed to load AI settings:', e)
-  }
-  return DEFAULT_SETTINGS
+export async function loadSettings(): Promise<AISettings> {
+  return await readJSON<AISettings>(SETTINGS_FILE, DEFAULT_SETTINGS)
 }
 
 // 保存设置
-export function saveSettings(settings: AISettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-  } catch (e) {
-    console.error('Failed to save AI settings:', e)
-  }
+export async function saveSettings(settings: AISettings): Promise<void> {
+  await writeJSON(SETTINGS_FILE, settings)
+}
+
+// 加载系统提示词
+export async function loadSystemPrompt(): Promise<string> {
+  const prompt = await readStorageFile(SYSTEM_PROMPT_FILE)
+  return prompt || SYSTEM_PROMPT
+}
+
+// 保存系统提示词
+export async function saveSystemPrompt(prompt: string): Promise<void> {
+  await writeStorageFile(SYSTEM_PROMPT_FILE, prompt)
 }
 
 // 发送聊天请求
