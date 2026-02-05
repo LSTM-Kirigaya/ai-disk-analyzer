@@ -14,7 +14,6 @@ on:
         type: string
 
 jobs:
-  # 检查是否需要构建 Release
   check-release:
     runs-on: ubuntu-latest
     outputs:
@@ -26,26 +25,22 @@ jobs:
       - name: Check release condition
         id: check
         run: |
-          # 如果是手动触发，直接构建
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          # 如果是 tag push，直接构建
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          # 检查 commit message 是否包含 [release]
           COMMIT_MSG=$(git log -1 --pretty=%B)
           echo "Commit message: $COMMIT_MSG"
           
           if [[ "$COMMIT_MSG" == *"[release]"* ]]; then
-            # 从 tauri.conf.json 读取版本号
             VERSION=$(grep '"version"' apps/desktop/src-tauri/tauri.conf.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
             echo "Detected [release] tag, version: $VERSION"
             echo "should_release=true" >> $GITHUB_OUTPUT
@@ -91,6 +86,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './apps/desktop/src-tauri -> target'
+
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -109,11 +109,10 @@ jobs:
         run: npm install -g @tauri-apps/cli@latest
 
       - name: Build Tauri app
-        working-directory: apps/desktop
+        working-directory: apps/desktop/src-tauri
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          # OAuth 配置（从 GitHub Secrets 读取，可选）
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           BAIDU_CLIENT_ID: ${{ secrets.BAIDU_CLIENT_ID }}
@@ -123,8 +122,19 @@ jobs:
           DROPBOX_CLIENT_ID: ${{ secrets.DROPBOX_CLIENT_ID }}
           DROPBOX_CLIENT_SECRET: ${{ secrets.DROPBOX_CLIENT_SECRET }}
         run: |
-          npm install
-          tauri build ${{ matrix.args }}
+          cargo tauri build ${{ matrix.args }}
+
+      - name: List build output (Debug)
+        shell: bash
+        run: |
+          echo "=== Listing target directory ==="
+          ls -la apps/desktop/src-tauri/target/${{ matrix.target }}/release/ || echo "Release directory not found"
+          echo "=== Listing bundle directory ==="
+          ls -la apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/ || echo "Bundle directory not found"
+          if [ -d "apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle" ]; then
+            echo "=== Bundle contents ==="
+            find apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle -type f
+          fi
 
       - name: Prepare release artifacts (Windows)
         if: runner.os == 'Windows'
@@ -134,21 +144,35 @@ jobs:
           New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
           $bundlePath = "apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           
-          # Try to find .msi installer first
+          Write-Host "Looking for installers in: $bundlePath"
+          
+          if (-not (Test-Path $bundlePath)) {
+            Write-Host "ERROR: Bundle path does not exist!"
+            Write-Host "Listing target directory..."
+            Get-ChildItem -Path "apps/desktop/src-tauri/target" -Recurse -Depth 3 | Select-Object FullName
+            exit 1
+          }
+          
           $installer = $null
           if (Test-Path "$bundlePath/msi") {
+            Write-Host "Found msi directory"
             $installer = Get-ChildItem -Path "$bundlePath/msi" -Filter "*.msi" | Select-Object -First 1
           }
           if (-not $installer -and (Test-Path "$bundlePath/nsis")) {
+            Write-Host "Found nsis directory"
             $installer = Get-ChildItem -Path "$bundlePath/nsis" -Filter "*.exe" | Select-Object -First 1
-          }
-          if (-not $installer) {
-            $installer = Get-ChildItem -Path $bundlePath -Recurse -Include "*.msi","*.exe" | Select-Object -First 1
           }
           
           if ($installer) {
+            Write-Host "Found installer: $($installer.FullName)"
             $ext = $installer.Extension
             Copy-Item $installer.FullName "release-artifacts/${{ matrix.artifact_name }}-${VERSION}${ext}"
+            Write-Host "Copied to: release-artifacts/${{ matrix.artifact_name }}-${VERSION}${ext}"
+          } else {
+            Write-Host "ERROR: No installer found!"
+            Write-Host "Bundle contents:"
+            Get-ChildItem -Path $bundlePath -Recurse | Select-Object FullName
+            exit 1
           }
 
       - name: Prepare release artifacts (macOS)
@@ -159,15 +183,34 @@ jobs:
           mkdir -p release-artifacts
           BUNDLE_PATH="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           
-          # Try to find .dmg installer
+          echo "Looking for installers in: $BUNDLE_PATH"
+          
+          if [ ! -d "$BUNDLE_PATH" ]; then
+            echo "ERROR: Bundle path does not exist!"
+            echo "Listing target directory..."
+            find apps/desktop/src-tauri/target -maxdepth 4 -type d
+            exit 1
+          fi
+          
+          DMG=""
           if [ -d "$BUNDLE_PATH/dmg" ]; then
+            echo "Found dmg directory"
             DMG=$(find "$BUNDLE_PATH/dmg" -name "*.dmg" | head -1)
-          else
+          fi
+          
+          if [ -z "$DMG" ]; then
             DMG=$(find "$BUNDLE_PATH" -name "*.dmg" | head -1)
           fi
           
           if [ -n "$DMG" ]; then
+            echo "Found DMG: $DMG"
             cp "$DMG" "release-artifacts/${{ matrix.artifact_name }}-${VERSION}.dmg"
+            echo "Copied to: release-artifacts/${{ matrix.artifact_name }}-${VERSION}.dmg"
+          else
+            echo "ERROR: No DMG found!"
+            echo "Bundle contents:"
+            find "$BUNDLE_PATH" -type f
+            exit 1
           fi
 
       - name: Upload artifacts
@@ -192,27 +235,43 @@ jobs:
         with:
           path: artifacts
 
+      - name: List downloaded artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find artifacts -type f
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.check-release.outputs.version }}
-          name: Release ${{ needs.check-release.outputs.version }}
+          name: DiskRookie ${{ needs.check-release.outputs.version }} (Beta)
           body: |
             ## DiskRookie ${{ needs.check-release.outputs.version }}
+            
+            > This is a beta release for testing purposes.
 
-            ### 下载
-            - **Windows x86_64**: 下载 `.msi` 安装包
-            - **macOS ARM64**: 下载 `.dmg` 安装包
+            ### Downloads
+            - **Windows x86_64**: Download `.msi` installer
+            - **macOS ARM64 (Apple Silicon)**: Download `.dmg` installer
 
-            ### 安装说明
-            - Windows: 运行 `.msi` 安装程序
-            - macOS: 打开 `.dmg` 文件，将应用拖拽到应用程序文件夹
+            ### Installation
+            - Windows: Run the `.msi` installer
+            - macOS: Open the `.dmg` file and drag the app to Applications folder
 
-            ### 变更日志
-            查看 commit 历史了解本次更新内容。
+            ### Features
+            - AI-powered disk analysis and cleanup suggestions
+            - Smart file categorization and recommendations
+            - Cloud storage integration (Google Drive, Baidu NetDisk)
+            - Beautiful visualization of disk usage
+            - Dark mode support
+            - Expert mode for advanced users
+
+            ### Notes
+            - This is a beta version, please report any issues
+            - OAuth credentials need to be configured in settings for cloud storage features
           files: |
             artifacts/**/*
           draft: false
-          prerelease: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
