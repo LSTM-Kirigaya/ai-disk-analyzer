@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -67,6 +68,7 @@ async function saveFileCount(fileCount: number): Promise<void> {
 
 /** AI 提示面板 */
 function AIPromptPanel({ result }: { result: ScanResult }) {
+    const { t } = useTranslation()
     const [fileListSummary, setFileListSummary] = useState('')
     const [instruction, setInstruction] = useState(DEFAULT_PROMPT_INSTRUCTION)
     const [copied, setCopied] = useState(false)
@@ -137,8 +139,8 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                             <MessageSquare size={20} />
                         </div>
                         <div>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'secondary.main' }}>AI 分析建议生成</Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>数据流已就绪</Typography>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'secondary.main' }}>{t('aiAnalysis.suggestionGeneration')}</Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>{t('aiAnalysis.dataReady')}</Typography>
                         </div>
                     </div>
                     <Button
@@ -162,14 +164,14 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                             }
                         }}
                     >
-                        {copied ? '已复制' : '复制全文本'}
+                        {copied ? t('common.copied') : t('common.copyAll')}
                     </Button>
                 </div>
                 {/* 文件数量滑块 - 移动到顶部 */}
                 <Box sx={{ px: 2, py: 1.5, bgcolor: 'action.hover', borderRadius: '12px', border: '1px solid', borderColor: 'divider' }} className="dark:!bg-gray-700/30 dark:!border-gray-600">
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            表格行数
+                            {t('aiAnalysis.tableRows')}
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.primary', fontSize: '11px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                             {fileCount}
@@ -203,7 +205,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                         ]}
                     />
                     <FormHelperText sx={{ fontSize: '10px', m: 0, mt: 0.5, color: 'text.secondary' }}>
-                        控制摘要表格中显示的文件行数（共 {result.file_count} 个文件）
+                        {t('aiAnalysis.controlTableRows', { count: result.file_count })}
                     </FormHelperText>
                 </Box>
             </div>
@@ -211,18 +213,18 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
                 <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">磁盘占用摘要</span>
+                        <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">{t('aiAnalysis.diskUsageSummary')}</span>
                     </div>
                     <div className="bg-slate-50 dark:bg-gray-700/50 rounded-2xl p-4 border border-slate-100 dark:border-gray-600 flex-1 overflow-y-auto min-h-0 thin-scrollbar" style={{ maxHeight: '100%' }}>
                         <pre className="text-xs text-slate-600 dark:text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">{fileListSummary}</pre>
                     </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">自定义提示词</span>
+                    <span className="text-[11px] font-bold text-slate-400 dark:text-gray-400 uppercase tracking-widest ml-1">{t('aiAnalysis.customPrompt')}</span>
                     <TextField
                         multiline fullWidth value={instruction}
                         onChange={(e) => setInstruction(e.target.value)}
-                        placeholder="请输入分析指令..."
+                        placeholder={t('aiAnalysis.inputPrompt')}
                         sx={{
                             flex: 1,
                             '& .MuiInputBase-root': {
@@ -306,6 +308,7 @@ export interface ExpertModeProps {
 }
 
 export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, settingsSavedTrigger, onAddMigrateTask, onFileDeleted, tasks = [] }: ExpertModeProps) {
+    const { t } = useTranslation()
     const [path, setPath] = useState('')
     const [status, setStatus] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
     const [errorMsg, setErrorMsg] = useState('')
@@ -357,7 +360,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
             // 标准模式：扫描完成后自动调用 AI 分析
             if (isAdmin === false) {
                 setAiAnalyzing(true)
-                setAiProgress('准备 AI 分析...')
+                setAiProgress(t('aiAnalysis.preparing'))
                 try {
                     const summary = await buildFileListSummary(res)
                     const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
@@ -365,13 +368,13 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                     // AI分析完成后显示系统通知（Windows右下角/macOS右上角）
                     const suggestionCount = aiResult.suggestions.length
                     const notificationBody = suggestionCount > 0 
-                        ? `找到 ${suggestionCount} 条清理建议，请查看下方建议列表。`
-                        : aiResult.summary || '当前磁盘空间使用良好，无需清理。'
-                    await showNotification('AI 分析完成', notificationBody)
+                        ? t('aiAnalysis.foundSuggestions', { count: suggestionCount })
+                        : aiResult.summary || t('aiAnalysis.noSuggestions')
+                    await showNotification(t('aiAnalysis.complete'), notificationBody)
                 } catch (aiError) {
-                    setErrorMsg(`AI 分析失败: ${aiError}`)
+                    setErrorMsg(`${t('aiAnalysis.failed')}: ${aiError}`)
                     // 分析失败时也显示系统通知
-                    await showNotification('AI 分析失败', String(aiError))
+                    await showNotification(t('aiAnalysis.failed'), String(aiError))
                 } finally {
                     setAiAnalyzing(false)
                     setAiProgress('')
@@ -594,9 +597,9 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
 
         // 显示完成通知
         if (failCount === 0) {
-            showNotification('批量执行完成', `成功处理 ${successCount} 个项目`)
+            showNotification(t('batch.executeComplete'), t('batch.successCount', { count: successCount }))
         } else {
-            showNotification('批量执行完成', `成功 ${successCount} 个，失败 ${failCount} 个`)
+            showNotification(t('batch.executeComplete'), t('batch.successAndFailed', { success: successCount, failed: failCount }))
         }
         
         // 清空选中状态
@@ -625,9 +628,9 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
             })
             setShowSaveDialog(false)
             setSnapshotName('')
-            showNotification('快照保存成功', `已保存快照：${snapshotName.trim()}`)
+            showNotification(t('snapshot.saveSuccess'), t('snapshot.savedSnapshot', { name: snapshotName.trim() }))
         } catch (e) {
-            showNotification('保存失败', String(e))
+            showNotification(t('snapshot.saveFailed'), String(e))
         }
     }, [result, path, snapshotName])
 
@@ -671,7 +674,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         // 标准模式：加载快照后自动进行 AI 分析
         if (isAdmin === false) {
             setAiAnalyzing(true)
-            setAiProgress('准备 AI 分析...')
+            setAiProgress(t('aiAnalysis.preparing'))
 
             const runAIAnalysis = async () => {
                 try {
@@ -679,7 +682,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                     const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
                     setAnalysisResult(aiResult)
                 } catch (aiError) {
-                    setErrorMsg(`AI 分析失败: ${aiError}`)
+                    setErrorMsg(`${t('aiAnalysis.failed')}: ${aiError}`)
                 } finally {
                     setAiAnalyzing(false)
                     setAiProgress('')
@@ -746,7 +749,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         <TextField
                             fullWidth size="small" value={path}
                             onChange={(e) => setPath(e.target.value)}
-                            placeholder="输入或选择路径开始分析..."
+                            placeholder={t('expertMode.inputOrSelectPath')}
                             sx={{
                                 '& .MuiOutlinedInput-root': {
                                     borderRadius: '12px', pl: '32px', fontSize: '13px',
@@ -785,7 +788,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                 }
                             }}
                         >
-                            选择文件夹
+                            {t('expertMode.selectFolder')}
                         </Button>
                         <Button
                             onClick={() => runScan(path)}
@@ -798,11 +801,11 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                 '&:hover': { bgcolor: 'primary.dark', color: '#1A1A1A' }
                             }}
                         >
-                            {status === 'scanning' ? '分析中...' : '开始扫描'}
+                            {status === 'scanning' ? t('expertMode.scanning') : t('expertMode.startScan')}
                         </Button>
                         {/* 只在开发者模式下显示保存快照按钮 */}
                         {result && status === 'done' && isAdmin && (
-                            <Tooltip title="保存快照" arrow>
+                            <Tooltip title={t('snapshot.saveSnapshot')} arrow>
                                 <Button
                                     onClick={handleSaveSnapshot}
                                     variant="outlined"
@@ -824,7 +827,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                         }
                                     }}
                                 >
-                                    保存快照
+                                    {t('snapshot.saveSnapshot')}
                                 </Button>
                             </Tooltip>
                         )}
@@ -839,7 +842,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                 {shallowDirs && <CheckCircle2 size={10} className="text-secondary" />}
                             </div>
                             <input type="checkbox" className="hidden" checked={shallowDirs} onChange={(e) => setShallowDirs(e.target.checked)} />
-                            <span className="text-[11px] font-medium text-slate-500 dark:text-gray-400 group-hover:text-secondary">对于 node_modules 等目录，只计大小不递归</span>
+                            <span className="text-[11px] font-medium text-slate-500 dark:text-gray-400 group-hover:text-secondary">{t('expertMode.shallowDirs')}</span>
                         </label>
                         <div className="w-px h-5 bg-slate-200 dark:bg-gray-600 shrink-0" aria-hidden />
                         <div className="bg-slate-200/50 dark:bg-gray-600/50 p-0.5 rounded-lg flex gap-0.5 border border-slate-200/80 dark:border-gray-600">
@@ -847,21 +850,21 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                 onClick={() => setIsAdmin(false)}
                                 className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${!isAdmin ? 'bg-white dark:bg-gray-600 text-secondary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}
                             >
-                                标准模式
+                                {t('expertMode.standardMode')}
                             </button>
                             <button
                                 onClick={() => setIsAdmin(true)}
                                 className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${isAdmin ? 'bg-secondary text-primary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}
                             >
-                                开发者模式
+                                {t('expertMode.developerMode')}
                             </button>
                         </div>
                     </div>
                     {result && (() => {
                         const stats = [
-                            { label: '处理耗时', val: formatDuration(result.scan_time_ms), Icon: Clock },
-                            { label: '文件总计', val: result.file_count.toLocaleString(), Icon: FileStack },
-                            { label: '占用空间', val: formatBytes(result.total_size), Icon: HardDrive }
+                            { label: t('expertMode.processTime'), val: formatDuration(result.scan_time_ms), Icon: Clock },
+                            { label: t('expertMode.totalFiles'), val: result.file_count.toLocaleString(), Icon: FileStack },
+                            { label: t('expertMode.diskUsage'), val: formatBytes(result.total_size), Icon: HardDrive }
                         ]
                         const tooltipTitle = stats.map(({ label, val }) => `${label}: ${val}`).join(' · ')
                         return (
@@ -894,7 +897,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                 }
                                             }}
                                         >
-                                            {allSelected ? '取消全选' : '全选'}
+                                            {allSelected ? t('common.deselectAll') : t('common.selectAll')}
                                         </Button>
                                     )
                                 })()}
@@ -921,7 +924,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                             }
                                         }}
                                     >
-                                        执行 ({selectedItems.size})
+                                        {t('common.execute')} ({selectedItems.size})
                                     </Button>
                                 )}
                                 <Tooltip title={tooltipTitle} arrow placement="bottom">
@@ -953,10 +956,10 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                             <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-xl border border-amber-100 dark:border-amber-800 text-sm">
                                 <div className="flex items-center gap-2">
                                     <Settings size={16} />
-                                    <span className="font-medium">标准模式需先配置 API。</span>
+                                    <span className="font-medium">{t('expertMode.needApiConfig')}</span>
                                 </div>
                                 <Button size="small" onClick={onOpenSettings} sx={{ fontWeight: 600, fontSize: '11px', color: 'inherit', textDecoration: 'underline', minWidth: 'auto', px: 1 }}>
-                                    去设置
+                                    {t('common.goSettings')}
                                 </Button>
                             </div>
                         )}
@@ -973,7 +976,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                     </div>
                     <div className="text-center">
                         <Typography variant="h4" sx={{ fontWeight: 900, color: 'secondary.main' }}>{progressFiles.toLocaleString()}</Typography>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>已处理文件对象</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>{t('expertMode.processedFiles')}</Typography>
                     </div>
                     <div className="flex gap-1 h-2">
                         {Array.from({ length: 12 }).map((_, i) => (
@@ -996,10 +999,10 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                     </div>
                     <div className="text-center">
                         <Typography variant="body1" sx={{ fontWeight: 600, color: 'text.primary', mb: 1 }} className="dark:text-gray-200">
-                            {aiProgress || 'AI 正在分析...'}
+                            {aiProgress || t('aiAnalysis.analyzing')}
                         </Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>
-                            智能分析中
+                            {t('aiAnalysis.analyzing2')}
                         </Typography>
                     </div>
                     <div className="flex gap-1 h-2">
@@ -1028,7 +1031,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                         <div className="flex items-center gap-2 mb-2">
                                             <Sparkles size={18} className="text-primary" />
                                             <span className="text-sm font-semibold text-slate-700 dark:text-gray-200">
-                                                AI 分析结果
+                                                {t('aiAnalysis.result')}
                                             </span>
                                         </div>
                                         <p className="text-xs text-slate-600 dark:text-gray-400 leading-relaxed">
@@ -1066,11 +1069,11 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                             >
                                                 {migrationTargetNames ? (
                                                     <>
-                                                        <span className="text-[10px] text-slate-500 dark:text-gray-400 mr-1">迁移至:</span>
+                                                        <span className="text-[10px] text-slate-500 dark:text-gray-400 mr-1">{t('aiAnalysis.migrateTo')}</span>
                                                         <span className="font-medium">{migrationTargetNames}</span>
                                                     </>
                                                 ) : (
-                                                    '设置迁移目标'
+                                                    t('aiAnalysis.setMigrationTarget')
                                                 )}
                                             </Button>
                                         </div>
@@ -1123,9 +1126,9 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
 
                                         // 三部分数据：删除、迁移、保留
                                         const pieData = [
-                                            { name: '删除', value: deleteSize, count: deleteSuggestions.length, percent: deletePercent, action: 'delete' as const, color: colors.delete },
-                                            { name: '迁移', value: moveSize, count: moveSuggestions.length, percent: movePercent, action: 'move' as const, color: colors.move },
-                                            { name: '保留', value: remainSize, count: 0, percent: remainPercent, action: 'keep' as const, color: colors.keep },
+                                            { name: t('aiAnalysis.delete'), value: deleteSize, count: deleteSuggestions.length, percent: deletePercent, action: 'delete' as const, color: colors.delete },
+                                            { name: t('aiAnalysis.migrate'), value: moveSize, count: moveSuggestions.length, percent: movePercent, action: 'move' as const, color: colors.move },
+                                            { name: t('aiAnalysis.keep'), value: remainSize, count: 0, percent: remainPercent, action: 'keep' as const, color: colors.keep },
                                         ].filter(d => d.value > 0)
 
                                         // 非线性缓动函数
@@ -1134,7 +1137,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
 
                                         return (
                                             <div className="bg-white dark:bg-gray-800 px-4 py-6 rounded-xl border border-slate-200 dark:border-gray-600 shadow-sm dark:shadow-gray-900/20 flex flex-col items-center gap-3">
-                                                <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 self-start">建议操作</h3>
+                                                <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 self-start">{t('aiAnalysis.suggestedActions')}</h3>
                                                 <div className="relative w-full" style={{ height: 200 }}>
                                                     <ResponsiveContainer width="100%" height="100%">
                                                         <PieChart>
@@ -1219,7 +1222,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                                                     transition: `all 0.3s ${smoothEasing}`,
                                                                                 }}
                                                                             >
-                                                                                待删除
+                                                                                {t('aiAnalysis.toDelete')}
                                                                             </div>
                                                                         </>
                                                                     )
@@ -1243,7 +1246,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                                                     transition: `all 0.3s ${smoothEasing}`,
                                                                                 }}
                                                                             >
-                                                                                待迁移
+                                                                                {t('aiAnalysis.toMigrate')}
                                                                             </div>
                                                                         </>
                                                                     )
@@ -1256,7 +1259,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                                             >
                                                                                 {(parseFloat(deletePercent) + parseFloat(movePercent)).toFixed(1)}%
                                                                             </div>
-                                                                            <div className="text-xs text-slate-500 dark:text-gray-400">可清理</div>
+                                                                            <div className="text-xs text-slate-500 dark:text-gray-400">{t('aiAnalysis.cleanable')}</div>
                                                                         </>
                                                                     )
                                                                 }
@@ -1315,7 +1318,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                                     {item.percent}%
                                                                 </span>
                                                                 <span className="text-xs text-slate-500 dark:text-gray-400">
-                                                                    {item.count} 项 · {formatBytes(item.value)}
+                                                                    {item.count} {t('aiAnalysis.items')} · {formatBytes(item.value)}
                                                                 </span>
                                                             </div>
                                                         </button>
@@ -1328,7 +1331,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                                     className="w-2 h-2 rounded-full"
                                                                     style={{ backgroundColor: colors.keep }}
                                                                 ></div>
-                                                                <span className="text-xs">保留</span>
+                                                                <span className="text-xs">{t('aiAnalysis.keep')}</span>
                                                             </div>
                                                             <span className="text-xs">{remainPercent}%</span>
                                                         </div>
@@ -1348,7 +1351,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                             e.currentTarget.style.transform = 'scale(1)'
                                                         }}
                                                     >
-                                                        显示全部
+                                                        {t('aiAnalysis.showAll')}
                                                     </button>
                                                 )}
                                             </div>
@@ -1393,8 +1396,10 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                             <CheckCircle2 size={48} className="mb-2" />
                                             <Typography variant="body2">
                                                 {actionFilter === 'all'
-                                                    ? '暂无清理建议，磁盘空间使用良好'
-                                                    : `暂无${actionFilter === 'delete' ? '删除' : '迁移'}建议`
+                                                    ? t('aiAnalysis.noCleanSuggestions')
+                                                    : actionFilter === 'delete' 
+                                                    ? t('aiAnalysis.noDeleteSuggestions')
+                                                    : t('aiAnalysis.noMigrateSuggestions')
                                                 }
                                             </Typography>
                                         </div>
@@ -1407,8 +1412,8 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-slate-100 dark:border-gray-600 overflow-hidden">
                             <div className="px-3 py-2 flex items-center justify-between border-b border-slate-100 dark:border-gray-600 shrink-0">
                                 <div className="bg-slate-200/50 dark:bg-gray-600/50 p-0.5 rounded-lg flex gap-0.5 border border-slate-200/80 dark:border-gray-600">
-                                    <button onClick={() => setViewMode('disk')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'disk' ? 'bg-white dark:bg-gray-600 text-secondary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>分布视窗</button>
-                                    <button onClick={() => setViewMode('ai-prompt')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'ai-prompt' ? 'bg-secondary text-primary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>AI 指令集</button>
+                                    <button onClick={() => setViewMode('disk')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'disk' ? 'bg-white dark:bg-gray-600 text-secondary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>{t('expertMode.diskView')}</button>
+                                    <button onClick={() => setViewMode('ai-prompt')} className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${viewMode === 'ai-prompt' ? 'bg-secondary text-primary shadow-sm' : 'text-slate-500 dark:text-gray-400'}`}>{t('expertMode.aiInstructions')}</button>
                                 </div>
                                 {hoverNode && viewMode === 'disk' && (
                                     <div className="px-3 py-1.5 bg-secondary text-primary rounded-lg text-[11px] font-semibold flex gap-2 items-center">
@@ -1444,9 +1449,9 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-gray-600 bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 hover:border-primary/50 hover:bg-primary/5 hover:text-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     >
                         <Folder size={18} />
-                        <span className="text-sm font-medium">选择文件夹</span>
+                        <span className="text-sm font-medium">{t('expertMode.selectFolder')}</span>
                     </button>
-                    <p className="mt-2 text-xs text-slate-400 dark:text-gray-500">分析磁盘占用</p>
+                    <p className="mt-2 text-xs text-slate-400 dark:text-gray-500">{t('expertMode.analyzeDiskUsage')}</p>
                 </div>
             )}
 
@@ -1463,17 +1468,17 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                 <DialogTitle sx={{ pb: 2 }}>
                     <Typography variant="h6" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Save size={20} />
-                        保存快照
+                        {t('snapshot.saveSnapshot')}
                     </Typography>
                 </DialogTitle>
                 <DialogContent>
                     <TextField
                         autoFocus
                         fullWidth
-                        label="快照名称"
+                        label={t('snapshot.snapshotName')}
                         value={snapshotName}
                         onChange={(e) => setSnapshotName(e.target.value)}
-                        placeholder="为这个快照起个名字..."
+                        placeholder={t('snapshot.inputSnapshotName')}
                         sx={{
                             mt: 1,
                             '& .MuiOutlinedInput-root': {
@@ -1487,7 +1492,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         }}
                     />
                     <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'text.secondary' }}>
-                        快照将保存扫描结果，不包含 AI 分析内容
+                        {t('snapshot.saveHint2')}
                     </Typography>
                 </DialogContent>
                 <DialogActions sx={{ px: 3, pb: 2.5 }}>
@@ -1495,7 +1500,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         onClick={() => setShowSaveDialog(false)}
                         sx={{ borderRadius: '10px', textTransform: 'none' }}
                     >
-                        取消
+                        {t('common.cancel')}
                     </Button>
                     <Button
                         onClick={handleConfirmSaveSnapshot}
@@ -1509,7 +1514,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                             '&:hover': { bgcolor: 'primary.dark', color: '#1A1A1A' }
                         }}
                     >
-                        保存
+                        {t('common.save')}
                     </Button>
                 </DialogActions>
             </Dialog>

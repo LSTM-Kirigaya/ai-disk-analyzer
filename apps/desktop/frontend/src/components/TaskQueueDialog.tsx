@@ -10,6 +10,7 @@ import {
   Chip,
   Tooltip,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import { X, Cloud, Clock, Trash2, Play, Pause, RotateCcw, FileX } from 'lucide-react'
 import type { Task, TaskStatus } from '../services/taskQueue'
 import { formatFileSize, formatTime } from '../services/taskQueue'
@@ -27,13 +28,13 @@ interface Props {
   isPaused: boolean
 }
 
-// 状态颜色和标签
-const statusConfig: Record<TaskStatus, { color: string; label: string; bgColor: string }> = {
-  pending: { color: '#f59e0b', label: '等待中', bgColor: '#fef3c7' },
-  uploading: { color: '#3b82f6', label: '上传中', bgColor: '#dbeafe' },
-  completed: { color: '#22c55e', label: '已完成', bgColor: '#dcfce7' },
-  failed: { color: '#ef4444', label: '失败', bgColor: '#fee2e2' },
-  cancelled: { color: '#6b7280', label: '已取消', bgColor: '#f3f4f6' },
+// 状态颜色配置（标签将在组件内使用 i18n）
+const statusConfig: Record<TaskStatus, { color: string; bgColor: string; key: string }> = {
+  pending: { color: '#f59e0b', bgColor: '#fef3c7', key: 'pending' },
+  uploading: { color: '#3b82f6', bgColor: '#dbeafe', key: 'uploading' },
+  completed: { color: '#22c55e', bgColor: '#dcfce7', key: 'completed' },
+  failed: { color: '#ef4444', bgColor: '#fee2e2', key: 'failed' },
+  cancelled: { color: '#6b7280', bgColor: '#f3f4f6', key: 'cancelled' },
 }
 
 // 单个任务项
@@ -46,6 +47,7 @@ function TaskItem({
   onCancel: () => void
   onRetry: () => void
 }) {
+  const { t } = useTranslation()
   const config = statusConfig[task.status]
   const providerInfo = task.targetConfigs[0] 
     ? CLOUD_STORAGE_PROVIDERS.find(p => p.id === task.targetConfigs[0].provider)
@@ -76,7 +78,7 @@ function TaskItem({
           </Typography>
         </Box>
         <Chip
-          label={config.label}
+          label={t(`taskQueue.${config.key}`)}
           size="small"
           sx={{
             height: '20px',
@@ -146,7 +148,7 @@ function TaskItem({
           )}
           {/* 显示源文件删除状态 */}
           {task.status === 'completed' && task.sourceDeleted && (
-            <Tooltip title="源文件已删除">
+            <Tooltip title={t('taskQueue.sourceDeleted')}>
               <Typography 
                 variant="caption" 
                 sx={{ 
@@ -158,7 +160,7 @@ function TaskItem({
                 }}
               >
                 <FileX size={12} />
-                已清理
+                {t('taskQueue.cleaned')}
               </Typography>
             </Tooltip>
           )}
@@ -166,14 +168,14 @@ function TaskItem({
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           {task.status === 'failed' && (
-            <Tooltip title="重试">
+            <Tooltip title={t('taskQueue.retry')}>
               <IconButton size="small" onClick={onRetry} sx={{ color: 'primary.main' }}>
                 <RotateCcw size={14} />
               </IconButton>
             </Tooltip>
           )}
           {(task.status === 'pending' || task.status === 'uploading') && (
-            <Tooltip title="取消">
+            <Tooltip title={t('taskQueue.cancel')}>
               <IconButton size="small" onClick={onCancel} sx={{ color: 'error.main' }}>
                 <X size={14} />
               </IconButton>
@@ -215,6 +217,7 @@ export function TaskQueueDialog({
   onResumeAll,
   isPaused,
 }: Props) {
+  const { t } = useTranslation()
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
 
   const filteredTasks = tasks.filter(task => {
@@ -260,10 +263,10 @@ export function TaskQueueDialog({
             </Box>
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px' }}>
-                处理队列
+                {t('taskQueue.title')}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {activeCount} 进行中 · {completedCount} 已完成 · {failedCount} 失败
+                {t('taskQueue.summary', { active: activeCount, completed: completedCount, failed: failedCount })}
               </Typography>
             </Box>
           </Box>
@@ -278,9 +281,9 @@ export function TaskQueueDialog({
         {/* 筛选标签 */}
         <Box sx={{ display: 'flex', gap: 1 }}>
           {[
-            { key: 'all', label: '全部' },
-            { key: 'active', label: '进行中' },
-            { key: 'completed', label: '已完成' },
+            { key: 'all', label: t('taskQueue.filterAll') },
+            { key: 'active', label: t('taskQueue.filterActive') },
+            { key: 'completed', label: t('taskQueue.filterCompleted') },
           ].map(item => (
             <Chip
               key={item.key}
@@ -306,7 +309,7 @@ export function TaskQueueDialog({
         {/* 操作按钮 */}
         <Box sx={{ display: 'flex', gap: 1 }}>
           {activeCount > 0 && (
-            <Tooltip title={isPaused ? '继续全部' : '暂停全部'}>
+            <Tooltip title={isPaused ? t('taskQueue.resumeAll') : t('taskQueue.pauseAll')}>
               <IconButton 
                 size="small" 
                 onClick={isPaused ? onResumeAll : onPauseAll}
@@ -317,7 +320,7 @@ export function TaskQueueDialog({
             </Tooltip>
           )}
           {completedCount > 0 && (
-            <Tooltip title="清除已完成">
+            <Tooltip title={t('taskQueue.clearCompleted')}>
               <IconButton size="small" onClick={onClearCompleted} sx={{ color: 'text.secondary' }}>
                 <Trash2 size={16} />
               </IconButton>
@@ -331,7 +334,7 @@ export function TaskQueueDialog({
           <Box sx={{ py: 6, textAlign: 'center' }}>
             <Cloud size={48} className="text-gray-300 dark:text-gray-600 mx-auto mb-3" />
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              {filter === 'all' ? '暂无任务' : filter === 'active' ? '没有进行中的任务' : '没有已完成的任务'}
+              {filter === 'all' ? t('taskQueue.noTasks') : filter === 'active' ? t('taskQueue.noActiveTasks') : t('taskQueue.noCompletedTasks')}
             </Typography>
           </Box>
         ) : (

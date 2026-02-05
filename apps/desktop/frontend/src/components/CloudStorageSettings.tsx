@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { 
   Cloud, 
   Plus, 
@@ -132,6 +133,7 @@ function ConfigDialog({
   config: CloudStorageConfig | null
   onSave: (config: CloudStorageConfig) => void
 }) {
+  const { t } = useTranslation()
   const [provider, setProvider] = useState<CloudStorageProvider>('google_drive')
   const [name, setName] = useState('')
   const [webdavUrl, setWebdavUrl] = useState('')
@@ -169,7 +171,7 @@ function ConfigDialog({
               .then(info => setUserInfo({
                 id: info.openid || '',
                 email: '',
-                name: info.username || '百度网盘用户',
+                name: info.username || t('cloudStorage.defaultUser.baidu'),
               }))
               .catch(() => setUserInfo(null))
             getBaiduNetdiskQuota(config.accessToken)
@@ -180,7 +182,7 @@ function ConfigDialog({
               .then(info => setUserInfo({
                 id: info.user_id || '',
                 email: info.email || '',
-                name: info.nick_name || info.user_name || '阿里云盘用户',
+                name: info.nick_name || info.user_name || t('cloudStorage.defaultUser.aliyun'),
               }))
               .catch(() => setUserInfo(null))
             getAliyunDriveQuota(config.accessToken)
@@ -257,7 +259,7 @@ function ConfigDialog({
         setUserInfo({
           id: '',
           email: '',
-          name: 'Google 用户',
+          name: t('cloudStorage.defaultUser.google'),
         })
       }
       
@@ -270,7 +272,7 @@ function ConfigDialog({
         setDriveQuota(null)
       }
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '授权失败')
+      setAuthError(err instanceof Error ? err.message : t('cloudStorage.authFailed'))
     } finally {
       setIsAuthenticating(false)
     }
@@ -297,7 +299,7 @@ function ConfigDialog({
         setUserInfo({
           id: info.openid || '',
           email: '',
-          name: info.username || '百度网盘用户',
+          name: info.username || t('cloudStorage.defaultUser.baidu'),
         })
         
         // 自动设置名称
@@ -310,7 +312,7 @@ function ConfigDialog({
         setUserInfo({
           id: '',
           email: '',
-          name: '百度网盘用户',
+          name: t('cloudStorage.defaultUser.baidu'),
         })
       }
       
@@ -323,7 +325,7 @@ function ConfigDialog({
         setDriveQuota(null)
       }
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '授权失败')
+      setAuthError(err instanceof Error ? err.message : t('cloudStorage.authFailed'))
     } finally {
       setIsAuthenticating(false)
     }
@@ -350,7 +352,7 @@ function ConfigDialog({
         setUserInfo({
           id: info.user_id || '',
           email: info.email || '',
-          name: info.nick_name || info.user_name || '阿里云盘用户',
+          name: info.nick_name || info.user_name || t('cloudStorage.defaultUser.aliyun'),
         })
         
         // 自动设置名称
@@ -362,7 +364,7 @@ function ConfigDialog({
         setUserInfo({
           id: '',
           email: '',
-          name: '阿里云盘用户',
+          name: t('cloudStorage.defaultUser.aliyun'),
         })
       }
       
@@ -375,7 +377,7 @@ function ConfigDialog({
         setDriveQuota(null)
       }
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '授权失败')
+      setAuthError(err instanceof Error ? err.message : t('cloudStorage.authFailed'))
     } finally {
       setIsAuthenticating(false)
     }
@@ -415,7 +417,7 @@ function ConfigDialog({
         setUserInfo({
           id: '',
           email: '',
-          name: 'Dropbox 用户',
+          name: t('cloudStorage.defaultUser.dropbox'),
         })
       }
       
@@ -428,7 +430,7 @@ function ConfigDialog({
         setDriveQuota(null)
       }
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '授权失败')
+      setAuthError(err instanceof Error ? err.message : t('cloudStorage.authFailed'))
     } finally {
       setIsAuthenticating(false)
     }
@@ -524,7 +526,7 @@ function ConfigDialog({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Cloud size={22} className="text-primary" />
           <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px' }}>
-            {config ? '编辑云存储' : '添加云存储'}
+            {config ? t('cloudStorage.editCloud') : t('cloudStorage.addCloud')}
           </Typography>
         </Box>
       </DialogTitle>
@@ -534,7 +536,7 @@ function ConfigDialog({
           {/* 选择提供商 */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-              云存储服务
+              {t('cloudStorage.cloudService')}
             </Typography>
             <FormControl fullWidth size="small">
               <Select
@@ -554,7 +556,7 @@ function ConfigDialog({
                       <ProviderIcon provider={p.id} size={18} />
                       <span>{p.name}</span>
                       {!p.available && (
-                        <Chip label="待定" size="small" sx={{ height: '18px', fontSize: '10px' }} />
+                        <Chip label={t('common.pending')} size="small" sx={{ height: '18px', fontSize: '10px' }} />
                       )}
                     </Box>
                   </MenuItem>
@@ -572,7 +574,7 @@ function ConfigDialog({
           {isOAuthProvider && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                账号连接
+                {t('cloudStorage.accountConnect')}
               </Typography>
               
               {userInfo ? (
@@ -635,7 +637,7 @@ function ConfigDialog({
                             <>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                                 <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                                  存储空间
+                                  {t('cloudStorage.storageSpace')}
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                   {formatStorageSize(usage)} / {formatStorageSize(limit)}
@@ -665,7 +667,7 @@ function ConfigDialog({
                                 />
                               </Box>
                               <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block', fontSize: '10px' }}>
-                                可用: {formatStorageSize(limit - usage)}
+                                {t('cloudStorage.available')}: {formatStorageSize(limit - usage)}
                               </Typography>
                             </>
                           )
@@ -682,7 +684,7 @@ function ConfigDialog({
                             <>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                                 <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                                  存储空间
+                                  {t('cloudStorage.storageSpace')}
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                   {formatStorageSize(used)} / {formatStorageSize(total)}
@@ -712,7 +714,7 @@ function ConfigDialog({
                                 />
                               </Box>
                               <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block', fontSize: '10px' }}>
-                                可用: {formatStorageSize(free)}
+                                {t('cloudStorage.available')}: {formatStorageSize(free)}
                               </Typography>
                             </>
                           )
@@ -729,7 +731,7 @@ function ConfigDialog({
                             <>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                                 <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                                  存储空间
+                                  {t('cloudStorage.storageSpace')}
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                                   {formatStorageSize(used)} / {formatStorageSize(total)}
@@ -759,7 +761,7 @@ function ConfigDialog({
                                 />
                               </Box>
                               <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block', fontSize: '10px' }}>
-                                可用: {formatStorageSize(free)}
+                                {t('cloudStorage.available')}: {formatStorageSize(free)}
                               </Typography>
                             </>
                           )
@@ -776,10 +778,10 @@ function ConfigDialog({
                             <>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                                 <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                                  存储空间
+                                  {t('cloudStorage.storageSpace')}
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                  {formatStorageSize(used)} / {total > 0 ? formatStorageSize(total) : '无限'}
+                                  {formatStorageSize(used)} / {total > 0 ? formatStorageSize(total) : t('cloudStorage.unlimited')}
                                 </Typography>
                               </Box>
                               {total > 0 && (
@@ -808,7 +810,7 @@ function ConfigDialog({
                                     />
                                   </Box>
                                   <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block', fontSize: '10px' }}>
-                                    可用: {formatStorageSize(free)}
+                                    {t('cloudStorage.available')}: {formatStorageSize(free)}
                                   </Typography>
                                 </>
                               )}
@@ -855,7 +857,7 @@ function ConfigDialog({
                       },
                     }}
                   >
-                    {isAuthenticating ? '正在授权...' : `使用 ${providerInfo?.name} 登录`}
+                    {isAuthenticating ? t('cloudStorage.authorizing') : t('cloudStorage.loginWith', { name: providerInfo?.name || '' })}
                   </Button>
                   
                   {authError && (
@@ -876,7 +878,7 @@ function ConfigDialog({
                   )}
                   
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '11px' }}>
-                    点击按钮后将在浏览器中打开授权页面，请在浏览器中完成登录
+                    {t('cloudStorage.browserAuthHint')}
                   </Typography>
                 </Box>
               )}
@@ -888,7 +890,7 @@ function ConfigDialog({
             <>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  WebDAV 地址
+                  {t('webdav.address')}
                 </Typography>
                 <TextField
                   fullWidth
@@ -906,27 +908,27 @@ function ConfigDialog({
                   sx={{ fontSize: '14px' }}
                 />
                 <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                  坚果云 WebDAV: https://dav.jianguoyun.com/dav/
+                  {t('webdav.jianguoyunUrl')}
                 </FormHelperText>
               </Box>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  用户名
+                  {t('webdav.username')}
                 </Typography>
                 <TextField
                   fullWidth
                   size="small"
                   value={webdavUsername}
                   onChange={(e) => setWebdavUsername(e.target.value)}
-                  placeholder="输入用户名或邮箱..."
+                  placeholder={t('webdav.inputUsername')}
                   sx={{ fontSize: '14px' }}
                 />
               </Box>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  密码 / 应用密码
+                  {t('webdav.password')}
                 </Typography>
                 <TextField
                   fullWidth
@@ -934,11 +936,11 @@ function ConfigDialog({
                   type="password"
                   value={webdavPassword}
                   onChange={(e) => setWebdavPassword(e.target.value)}
-                  placeholder="输入密码或应用专用密码..."
+                  placeholder={t('webdav.inputPassword')}
                   sx={{ fontSize: '14px' }}
                 />
                 <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                  坚果云需要使用"应用密码"而非登录密码
+                  {t('webdav.jianguoyunHint')}
                 </FormHelperText>
               </Box>
 
@@ -955,7 +957,7 @@ function ConfigDialog({
                     px: 0,
                   }}
                 >
-                  查看 WebDAV 配置指南
+                  {t('webdav.configGuide')}
                 </Button>
               )}
             </>
@@ -965,14 +967,14 @@ function ConfigDialog({
           {(userInfo || isWebDAV) && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                显示名称（可选）
+                {t('cloudStorage.displayName')}
               </Typography>
               <TextField
                 fullWidth
                 size="small"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={userInfo?.email || providerInfo?.name || '输入名称...'}
+                placeholder={userInfo?.email || providerInfo?.name || t('cloudStorage.inputName')}
                 sx={{ fontSize: '14px' }}
               />
             </Box>
@@ -982,7 +984,7 @@ function ConfigDialog({
           {(userInfo || isWebDAV) && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                迁移目标文件夹
+                {t('cloudStorage.targetFolder')}
               </Typography>
               <TextField
                 fullWidth
@@ -1000,7 +1002,7 @@ function ConfigDialog({
                 sx={{ fontSize: '14px' }}
               />
               <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                文件将迁移到此目录下
+                {t('cloudStorage.fileMigrateHint')}
               </FormHelperText>
             </Box>
           )}
@@ -1021,7 +1023,7 @@ function ConfigDialog({
             >
               <HardDrive size={16} className="shrink-0 mt-0.5" />
               <Typography variant="body2" sx={{ fontSize: '12px' }}>
-                NAS 服务（如群晖、威联通）可通过 WebDAV 协议连接，请在 NAS 中开启 WebDAV 服务
+                {t('webdav.nasHint')}
               </Typography>
             </Box>
           )}
@@ -1042,7 +1044,7 @@ function ConfigDialog({
           }}
           className="dark:!border-gray-600 dark:!text-gray-300"
         >
-          取消
+          {t('common.cancel')}
         </Button>
         <Button
           onClick={handleSave}
@@ -1063,7 +1065,7 @@ function ConfigDialog({
             },
           }}
         >
-          保存
+          {t('common.save')}
         </Button>
       </DialogActions>
     </Dialog>
@@ -1071,6 +1073,7 @@ function ConfigDialog({
 }
 
 export function CloudStorageSettings({ onConfigured }: Props) {
+  const { t } = useTranslation()
   const [settings, setSettings] = useState<CloudStorageSettingsType>({ configs: [] })
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingConfig, setEditingConfig] = useState<CloudStorageConfig | null>(null)
@@ -1144,11 +1147,11 @@ export function CloudStorageSettings({ onConfigured }: Props) {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Cloud size={18} className="text-blue-500" />
           <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-            数据迁移 · 云存储配置
+            {t('cloudStorage.dataMigration')} · {t('cloudStorage.cloudConfig')}
           </Typography>
           {enabledCount > 0 && (
             <Chip
-              label={`${enabledCount} 个已启用`}
+              label={t('cloudStorage.enabledCount', { count: enabledCount })}
               size="small"
               color="primary"
               sx={{ height: '20px', fontSize: '10px', ml: 'auto' }}
@@ -1157,7 +1160,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
           {saved && (
             <Chip
               icon={<Check size={12} />}
-              label="已保存"
+              label={t('common.saved')}
               size="small"
               color="success"
               sx={{ height: '20px', fontSize: '10px' }}
@@ -1203,7 +1206,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
                       </Typography>
                       {isDefault && (
                         <Chip
-                          label="默认"
+                          label={t('common.default')}
                           size="small"
                           sx={{ 
                             height: '16px', 
@@ -1220,7 +1223,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
                         fontSize: '10px',
                       }}
                     >
-                      {config.provider === 'webdav' ? config.webdavUrl : `OAuth · ${config.targetFolder}`}
+                      {config.provider === 'webdav' ? config.webdavUrl : `${t('cloudStorage.oauth')} · ${config.targetFolder}`}
                     </Typography>
                   </Box>
 
@@ -1238,7 +1241,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
                           color: '#1A1A1A',
                         }}
                       >
-                        设为默认
+                        {t('common.setDefault')}
                       </Button>
                     )}
                     <IconButton
@@ -1298,10 +1301,10 @@ export function CloudStorageSettings({ onConfigured }: Props) {
           >
             <Cloud size={32} className="opacity-30" />
             <Typography variant="body2" sx={{ fontSize: '13px' }}>
-              尚未配置云存储服务
+              {t('cloudStorage.notConfigured')}
             </Typography>
             <Typography variant="caption" sx={{ fontSize: '11px', opacity: 0.7 }}>
-              添加云存储后即可将文件迁移到云端
+              {t('cloudStorage.addCloudHint')}
             </Typography>
           </Box>
         )}
@@ -1329,7 +1332,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
             },
           }}
         >
-          添加云存储
+          {t('cloudStorage.addCloud')}
         </Button>
 
         {/* 提示信息 */}
@@ -1346,7 +1349,7 @@ export function CloudStorageSettings({ onConfigured }: Props) {
         >
           <AlertCircle size={14} className="text-amber-500 shrink-0 mt-0.5" />
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '11px', lineHeight: 1.5 }}>
-            OAuth 凭据需要在对应云服务的开发者平台申请。WebDAV 支持坚果云、群晖 NAS 等服务。
+            {t('cloudStorage.oauthHint')}
           </Typography>
         </Box>
       </Box>

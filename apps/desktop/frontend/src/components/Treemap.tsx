@@ -163,13 +163,14 @@ export function Treemap({ root, width, height, onHover }: TreemapProps) {
     return out
   }, [root, dimensions])
 
+  // 统一使用 primary 颜色色系（#FFD200 黄色系），不同深度使用不同透明度
   const colorsByDepth = [
-    'rgba(255, 210, 0, 0.7)',
-    'rgba(26, 26, 26, 0.6)',
-    'rgba(255, 210, 0, 0.5)',
-    'rgba(26, 26, 26, 0.5)',
-    'rgba(178, 230, 0, 0.55)',
-    'rgba(255, 210, 0, 0.4)',
+    'rgba(255, 210, 0, 0.75)',  // 最浅，第一层
+    'rgba(255, 210, 0, 0.65)',  // 第二层
+    'rgba(255, 210, 0, 0.55)',  // 第三层
+    'rgba(255, 210, 0, 0.45)',  // 第四层
+    'rgba(255, 210, 0, 0.35)',  // 第五层
+    'rgba(255, 210, 0, 0.25)',  // 最深，第六层
   ]
 
   return (

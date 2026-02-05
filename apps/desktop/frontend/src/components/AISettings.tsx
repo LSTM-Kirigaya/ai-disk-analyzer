@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud, Settings } from 'lucide-react'
 import { showNotification } from '../services/notification'
 import {
   TextField,
@@ -32,11 +33,17 @@ import {
 } from '../services/ai'
 import { loadAppSettings, saveAppSettings, type AppSettings } from '../services/settings'
 import { CloudStorageSettings } from './CloudStorageSettings'
+import { setLanguage, supportedLanguages } from '../i18n'
+import { readStorageFile, writeStorageFile } from '../services/storage'
 
 interface Props {
   onClose: () => void
   initialTab?: number  // 允许外部指定初始 Tab
   onSaved?: () => void  // 保存成功后的回调
+  themePreference?: 'light' | 'dark' | 'system'  // 主题偏好
+  onThemeChange?: (theme: 'light' | 'dark' | 'system') => void  // 主题改变回调
+  currentLanguage?: string  // 当前语言
+  onLanguageChange?: (lang: string) => void  // 语言改变回调
 }
 
 interface TabPanelProps {
@@ -66,7 +73,10 @@ function TabPanel(props: TabPanelProps) {
   )
 }
 
-export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
+const THEME_STORAGE_FILE = 'theme.txt'
+
+export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: externalThemePreference, onThemeChange, currentLanguage: externalCurrentLanguage, onLanguageChange }: Props) {
+  const { t, i18n } = useTranslation()
   const [settings, setSettings] = useState<AISettingsType>(DEFAULT_SETTINGS)
   const [appSettings, setAppSettings] = useState<AppSettings>({ promptFileCount: 100 })
   const [showApiKey, setShowApiKey] = useState(false)
@@ -77,6 +87,38 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
   const [loadingModels, setLoadingModels] = useState(false)
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState(initialTab)
+  
+  // 主题和语言状态（如果外部传入则使用外部值，否则使用内部状态）
+  const [internalThemePreference, setInternalThemePreference] = useState<'light' | 'dark' | 'system'>('system')
+  const [internalLanguage, setInternalLanguage] = useState<string>(i18n.language)
+  
+  const themePreference = externalThemePreference ?? internalThemePreference
+  const currentLanguage = externalCurrentLanguage ?? internalLanguage
+  
+  // 加载主题设置（如果没有外部传入）
+  useEffect(() => {
+    if (!externalThemePreference) {
+      readStorageFile(THEME_STORAGE_FILE).then(stored => {
+        if (stored === 'dark' || stored === 'light' || stored === 'system') {
+          setInternalThemePreference(stored)
+        }
+      })
+    }
+  }, [externalThemePreference])
+  
+  // 加载语言设置（如果没有外部传入）
+  useEffect(() => {
+    if (!externalCurrentLanguage) {
+      try {
+        const savedLang = localStorage.getItem('app-language')
+        if (savedLang) {
+          setInternalLanguage(savedLang)
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [externalCurrentLanguage])
 
   useEffect(() => {
     loadSettings().then(loaded => {
@@ -142,7 +184,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
         onClose()
       }, 400)
     } catch (error) {
-      showNotification('保存设置失败', String(error))
+      showNotification(t('settings.saveFailed'), String(error))
     }
   }
 
@@ -174,7 +216,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
         <div className="flex items-center justify-between p-4 border-b border-border dark:border-gray-600">
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 bg-primary rounded"></div>
-            <h2 className="text-lg font-semibold text-secondary dark:text-gray-100">设置</h2>
+            <h2 className="text-lg font-semibold text-secondary dark:text-gray-100">{t('settings.title')}</h2>
           </div>
           <IconButton
             onClick={onClose}
@@ -215,16 +257,23 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
             <Tab
               icon={<Brain size={16} />}
               iconPosition="start"
-              label="AI 模型"
+              label={t('settings.aiModel')}
               id="settings-tab-0"
               aria-controls="settings-tabpanel-0"
             />
             <Tab
               icon={<Cloud size={16} />}
               iconPosition="start"
-              label="数据迁移"
+              label={t('settings.cloudService')}
               id="settings-tab-1"
               aria-controls="settings-tabpanel-1"
+            />
+            <Tab
+              icon={<Settings size={16} />}
+              iconPosition="start"
+              label={t('settings.general')}
+              id="settings-tab-2"
+              aria-controls="settings-tabpanel-2"
             />
           </Tabs>
         </Box>
@@ -237,7 +286,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
               {/* API URL */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  API 地址
+                  {t('settings.apiUrl')}
                 </Typography>
                 <FormControl fullWidth size="small">
                   <Select
@@ -258,7 +307,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                     size="small"
                     value={settings.apiUrl}
                     onChange={(e) => setSettings(s => ({ ...s, apiUrl: e.target.value }))}
-                    placeholder="输入自定义 API URL..."
+                    placeholder={t('settings.inputCustomApiUrl')}
                     sx={{ fontSize: '14px' }}
                   />
                 )}
@@ -267,7 +316,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
               {/* API Key */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                  API Key
+                  {t('settings.apiKey')}
                 </Typography>
                 <TextField
                   fullWidth
@@ -275,7 +324,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                   type={showApiKey ? 'text' : 'password'}
                   value={settings.apiKey}
                   onChange={(e) => setSettings(s => ({ ...s, apiKey: e.target.value }))}
-                  placeholder="输入您的 API Key..."
+                  placeholder={t('settings.inputApiKey')}
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position="end">
@@ -294,7 +343,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                 />
                 <FormHelperText sx={{ fontSize: '10px', display: 'flex', alignItems: 'center', gap: 0.5, m: 0 }}>
                   <AlertCircle className="w-3 h-3" />
-                  API Key 仅保存在本地，不会上传到任何服务器
+                  {t('settings.apiKeyHint')}
                 </FormHelperText>
               </Box>
 
@@ -302,13 +351,13 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
               {settings.apiKey && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                    模型
+                    {t('settings.model')}
                   </Typography>
                   {loadingModels ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
                       <CircularProgress size={16} />
                       <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '12px' }}>
-                        正在加载可用模型...
+                        {t('settings.loadingModels')}
                       </Typography>
                     </Box>
                   ) : (
@@ -335,7 +384,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                             </MenuItem>
                           ))
                         )}
-                        <MenuItem value="custom">自定义</MenuItem>
+                        <MenuItem value="custom">{t('common.custom')}</MenuItem>
                       </Select>
                     </FormControl>
                   )}
@@ -345,7 +394,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                       size="small"
                       value={settings.model}
                       onChange={(e) => setSettings(s => ({ ...s, model: e.target.value }))}
-                      placeholder="输入自定义模型名称..."
+                      placeholder={t('settings.inputCustomModel')}
                       sx={{ fontSize: '14px' }}
                     />
                   )}
@@ -375,7 +424,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                   }}
                 >
                   <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
-                    高级设置
+                    {t('settings.advancedSettings')}
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 0, pb: 2 }}>
@@ -383,7 +432,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                     {/* Temperature */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ color: 'text.primary' }}>温度 (Temperature)</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.primary' }}>{t('settings.temperature')}</Typography>
                         <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                           {settings.temperature.toFixed(1)}
                         </Typography>
@@ -397,14 +446,14 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                         sx={{ color: 'primary.main' }}
                       />
                       <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                        较低的值使输出更确定，较高的值使输出更有创意
+                        {t('settings.temperatureHint')}
                       </FormHelperText>
                     </Box>
 
                     {/* Max Tokens */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ color: 'text.primary' }}>最大令牌数 (Max Tokens)</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.primary' }}>{t('settings.maxTokens')}</Typography>
                         <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                           {settings.maxTokens}
                         </Typography>
@@ -418,14 +467,14 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                         sx={{ color: 'primary.main' }}
                       />
                       <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                        控制 AI 回复的最大长度
+                        {t('settings.maxTokensHint')}
                       </FormHelperText>
                     </Box>
 
                     {/* Prompt File Count */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" sx={{ color: 'text.primary' }}>Prompt 文件数量</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.primary' }}>{t('settings.promptFileCount')}</Typography>
                         <Typography variant="body2" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                           {appSettings.promptFileCount}
                         </Typography>
@@ -444,7 +493,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                         ]}
                       />
                       <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
-                        控制发送给 AI 的文件列表数量（更多文件会消耗更多 Token）
+                        {t('settings.promptFileCountHint')}
                       </FormHelperText>
                     </Box>
                   </Box>
@@ -453,9 +502,68 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
             </Box>
           </TabPanel>
 
-          {/* 数据迁移设置 Tab */}
+          {/* 云盘服务设置 Tab */}
           <TabPanel value={activeTab} index={1}>
             <CloudStorageSettings />
+          </TabPanel>
+
+          {/* 通用设置 Tab */}
+          <TabPanel value={activeTab} index={2}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              {/* 主题设置 */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                  {t('settings.theme')}
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={themePreference}
+                    onChange={(e) => {
+                      const newTheme = e.target.value as 'light' | 'dark' | 'system'
+                      if (onThemeChange) {
+                        onThemeChange(newTheme)
+                      } else {
+                        setInternalThemePreference(newTheme)
+                        void writeStorageFile(THEME_STORAGE_FILE, newTheme)
+                      }
+                    }}
+                    sx={{ fontSize: '14px' }}
+                  >
+                    <MenuItem value="light">{t('theme.light')}</MenuItem>
+                    <MenuItem value="dark">{t('theme.dark')}</MenuItem>
+                    <MenuItem value="system">{t('theme.system')}</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              {/* 语言设置 */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                  {t('language.title')}
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={currentLanguage}
+                    onChange={(e) => {
+                      const newLang = e.target.value
+                      setLanguage(newLang)
+                      if (onLanguageChange) {
+                        onLanguageChange(newLang)
+                      } else {
+                        setInternalLanguage(newLang)
+                      }
+                    }}
+                    sx={{ fontSize: '14px' }}
+                  >
+                    {supportedLanguages.map((lang) => (
+                      <MenuItem key={lang.code} value={lang.code}>
+                        {lang.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
           </TabPanel>
         </div>
 
@@ -480,7 +588,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                 },
               }}
             >
-              重置为默认
+              {t('settings.resetDefault')}
             </Button>
           ) : (
             <Box />
@@ -500,8 +608,8 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                   borderColor: 'divider',
                 },
               }}
-            >
-              取消
+              >
+              {t('common.cancel')}
             </Button>
             {activeTab === 0 && (
               <Button
@@ -525,7 +633,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved }: Props) {
                   },
                 }}
               >
-                {saved ? '已保存' : '保存设置'}
+                {saved ? t('common.saved') : t('settings.saveSettings')}
               </Button>
             )}
           </Box>

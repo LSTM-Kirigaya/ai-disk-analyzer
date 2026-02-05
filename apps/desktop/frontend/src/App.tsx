@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-shell'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { Settings, Github, Mail, ExternalLink, Sun, Moon, Monitor, Minus, Copy, X, ListTodo } from 'lucide-react'
-import { ThemeProvider, createTheme, CssBaseline, IconButton, Box, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, Button, Badge } from '@mui/material'
+import { Settings, Github, Mail, ExternalLink, Minus, Copy, X, ListTodo } from 'lucide-react'
+import { ThemeProvider, createTheme, CssBaseline, IconButton, Box, Tooltip, Button, Badge } from '@mui/material'
+import { setLanguage } from './i18n'
 import { ExpertMode } from './components/ExpertMode'
 import { AISettings } from './components/AISettings'
 import { SnapshotDialog } from './components/SnapshotDialog'
@@ -27,14 +29,13 @@ interface UploadProgressEvent {
 const THEME_STORAGE_FILE = 'theme.txt'
 
 function App() {
+  const { t, i18n } = useTranslation()
   const win = getCurrentWindow()
   const [showSettings, setShowSettings] = useState(false)
   const [showSnapshots, setShowSnapshots] = useState(false)
   const [loadedSnapshot, setLoadedSnapshot] = useState<Snapshot | null>(null)
   const [platform, setPlatform] = useState<'macos' | 'windows' | 'linux'>('windows')
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system')
-  const [themeMenuAnchor, setThemeMenuAnchor] = useState<null | HTMLElement>(null)
-  const [language, setLanguage] = useState<string>('en')
   const [settingsSavedTrigger, setSettingsSavedTrigger] = useState(0)
   // 任务队列状态
   const [showTaskQueue, setShowTaskQueue] = useState(false)
@@ -264,7 +265,7 @@ function App() {
     }
 
     processNextTask()
-  }, [tasks, isPaused, updateTask])
+  }, [tasks, isPaused, updateTask, t])
 
   // 检测系统主题
   const systemTheme = useMemo(() => {
@@ -305,14 +306,6 @@ function App() {
     void writeStorageFile(THEME_STORAGE_FILE, themePreference)
   }, [themeMode, themePreference])
 
-  // 检测语言
-  useEffect(() => {
-    const detectLanguage = () => {
-      const browserLang = navigator.language.toLowerCase()
-      setLanguage(browserLang.startsWith('zh') ? 'zh' : 'en')
-    }
-    detectLanguage()
-  }, [])
 
   const theme = useMemo(() => createTheme({
     palette: {
@@ -348,10 +341,74 @@ function App() {
       }
     }
     detectPlatform()
+    
+    // 清理定时器
+    return () => {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current)
+      }
+    }
   }, [])
 
-  const handleTitleBarMouseDown = () => {
-    win.startDragging()
+  // 用于跟踪点击时间，防止双击时触发拖拽
+  const lastClickTimeRef = useRef<number>(0)
+  const clickTimeoutRef = useRef<number | null>(null)
+  const isDraggingRef = useRef<boolean>(false)
+
+  const handleTitleBarMouseDown = (e: React.MouseEvent) => {
+    const now = Date.now()
+    const timeSinceLastClick = now - lastClickTimeRef.current
+    
+    // 如果两次点击间隔小于 300ms，认为是双击，不触发拖拽
+    if (timeSinceLastClick < 300) {
+      if (clickTimeoutRef.current !== null) {
+        clearTimeout(clickTimeoutRef.current)
+        clickTimeoutRef.current = null
+      }
+      // 阻止拖拽
+      e.preventDefault()
+      e.stopPropagation()
+      isDraggingRef.current = false
+      return
+    }
+    
+    // 记录点击时间
+    lastClickTimeRef.current = now
+    
+    // 延迟启动拖拽，给双击事件留出时间
+    clickTimeoutRef.current = window.setTimeout(() => {
+      if (!isDraggingRef.current) {
+        win.startDragging()
+        isDraggingRef.current = true
+      }
+    }, 200)
+  }
+
+  // 双击切换最大化
+  const handleTitleBarDoubleClick = async (e: React.MouseEvent) => {
+    // 阻止事件冒泡和默认行为
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // 清除拖拽定时器
+    if (clickTimeoutRef.current !== null) {
+      clearTimeout(clickTimeoutRef.current)
+      clickTimeoutRef.current = null
+    }
+    
+    // 阻止拖拽
+    isDraggingRef.current = true
+    
+    try {
+      await win.toggleMaximize()
+    } catch (error) {
+      console.error('切换最大化失败:', error)
+    }
+    
+    // 重置拖拽状态
+    setTimeout(() => {
+      isDraggingRef.current = false
+    }, 100)
   }
 
   return (
@@ -395,7 +452,7 @@ function App() {
                   transform: 'scale(0.95)',
                 },
               }}
-              title="关闭"
+              title={t('titleBar.close')}
             />
             {/* 最小化按钮（黄色） */}
             <Box
@@ -418,7 +475,7 @@ function App() {
                   transform: 'scale(0.95)',
                 },
               }}
-              title="最小化"
+              title={t('titleBar.minimize')}
             />
             {/* 全屏按钮（绿色） */}
             <Box
@@ -441,7 +498,7 @@ function App() {
                   transform: 'scale(0.95)',
                 },
               }}
-              title="全屏"
+              title={t('titleBar.fullscreen')}
             />
           </Box>
         )}
@@ -450,6 +507,7 @@ function App() {
         <div
           data-tauri-drag-region
           onMouseDown={handleTitleBarMouseDown}
+          onDoubleClick={handleTitleBarDoubleClick}
           className="flex items-center px-4 h-full cursor-default gap-2"
           style={{ flex: '0 0 auto' }}
         >
@@ -462,7 +520,7 @@ function App() {
             />
           )}
           <span className={`text-sm font-semibold ${platform === 'macos' ? '' : 'mr-16'} ${themeMode === 'dark' ? 'text-gray-100' : 'text-secondary'}`}>
-            {language === 'zh' ? '磁盘菜鸟' : 'DiskRookie'}
+            {t('app.name')}
           </span>
         </div>
         
@@ -470,10 +528,18 @@ function App() {
         <div
           data-tauri-drag-region
           onMouseDown={handleTitleBarMouseDown}
+          onDoubleClick={handleTitleBarDoubleClick}
           className="flex-1 flex items-center justify-center h-full cursor-default px-4"
         >
           <Button
-            onClick={() => setShowSnapshots(true)}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              setShowSnapshots(true)
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+            }}
             sx={(theme) => ({
               minWidth: '280px',
               maxWidth: '400px',
@@ -516,14 +582,14 @@ function App() {
                 </span>
               </Box>
             ) : (
-              '快照管理'
+              t('app.snapshotManagement')
             )}
           </Button>
         </div>
         
         {/* 项目信息链接 */}
         <div className={`flex items-center h-full px-2 gap-0.5 border-r mr-1 ${themeMode === 'dark' ? 'border-gray-700' : 'border-border'}`}>
-          <Tooltip title="GitHub 仓库" arrow>
+          <Tooltip title={t('tooltip.githubRepo')} arrow>
             <IconButton
               size="small"
               onClick={() => open('https://github.com/LSTM-Kirigaya/DiskRookie')}
@@ -540,7 +606,7 @@ function App() {
               <Github className="w-3.5 h-3.5" />
             </IconButton>
           </Tooltip>
-          <Tooltip title="邮箱：zhelonghuang@qq.com" arrow>
+          <Tooltip title={t('tooltip.email')} arrow>
             <IconButton
               size="small"
               onClick={() => open('mailto:zhelonghuang@qq.com')}
@@ -557,7 +623,7 @@ function App() {
               <Mail className="w-3.5 h-3.5" />
             </IconButton>
           </Tooltip>
-          <Tooltip title="个人主页" arrow>
+          <Tooltip title={t('tooltip.homepage')} arrow>
             <IconButton
               size="small"
               onClick={() => open('https://kirigaya.cn/about')}
@@ -579,7 +645,7 @@ function App() {
         {/* 功能按钮 */}
         <div className="flex items-center h-full px-2 gap-1">
           {/* 工作队列按钮 */}
-          <Tooltip title="处理队列" arrow>
+          <Tooltip title={t('tooltip.taskQueue')} arrow>
             <IconButton
               size="small"
               onClick={() => setShowTaskQueue(true)}
@@ -612,82 +678,10 @@ function App() {
               </Badge>
             </IconButton>
           </Tooltip>
-          <Tooltip title="主题设置" arrow>
-            <IconButton
-              size="small"
-              onClick={(e) => setThemeMenuAnchor(e.currentTarget)}
-              sx={{
-                width: '28px',
-                height: '28px',
-                color: 'text.secondary',
-                '&:hover': {
-                  bgcolor: 'action.hover',
-                },
-              }}
-            >
-              {themePreference === 'system' ? (
-                <Monitor className="w-4 h-4" />
-              ) : themeMode === 'dark' ? (
-                <Moon className="w-4 h-4" />
-              ) : (
-                <Sun className="w-4 h-4" />
-              )}
-            </IconButton>
-          </Tooltip>
-          <Menu
-            anchorEl={themeMenuAnchor}
-            open={Boolean(themeMenuAnchor)}
-            onClose={() => setThemeMenuAnchor(null)}
-            anchorOrigin={{
-              vertical: 'bottom',
-              horizontal: 'right',
-            }}
-            transformOrigin={{
-              vertical: 'top',
-              horizontal: 'right',
-            }}
-          >
-            <MenuItem
-              selected={themePreference === 'light'}
-              onClick={() => {
-                setThemePreference('light')
-                setThemeMenuAnchor(null)
-              }}
-            >
-              <ListItemIcon>
-                <Sun className="w-4 h-4" />
-              </ListItemIcon>
-              <ListItemText>浅色</ListItemText>
-            </MenuItem>
-            <MenuItem
-              selected={themePreference === 'dark'}
-              onClick={() => {
-                setThemePreference('dark')
-                setThemeMenuAnchor(null)
-              }}
-            >
-              <ListItemIcon>
-                <Moon className="w-4 h-4" />
-              </ListItemIcon>
-              <ListItemText>深色</ListItemText>
-            </MenuItem>
-            <MenuItem
-              selected={themePreference === 'system'}
-              onClick={() => {
-                setThemePreference('system')
-                setThemeMenuAnchor(null)
-              }}
-            >
-              <ListItemIcon>
-                <Monitor className="w-4 h-4" />
-              </ListItemIcon>
-              <ListItemText>跟随系统</ListItemText>
-            </MenuItem>
-          </Menu>
           <IconButton
             size="small"
             onClick={() => setShowSettings(true)}
-            title="设置"
+            title={t('settings.title')}
             sx={{
               width: '28px',
               height: '28px',
@@ -707,7 +701,7 @@ function App() {
             <IconButton
               size="small"
               onClick={() => win.minimize()}
-              title="最小化"
+              title={t('titleBar.minimize')}
               sx={{
                 width: '40px',
                 height: '40px',
@@ -723,7 +717,7 @@ function App() {
             <IconButton
               size="small"
               onClick={() => win.toggleMaximize()}
-              title="最大化 / 还原"
+              title={t('titleBar.maximize')}
               sx={{
                 width: '40px',
                 height: '40px',
@@ -739,7 +733,7 @@ function App() {
             <IconButton
               size="small"
               onClick={() => win.close()}
-              title="关闭"
+              title={t('titleBar.close')}
               sx={{
                 width: '40px',
                 height: '40px',
@@ -777,6 +771,15 @@ function App() {
         <AISettings 
           onClose={() => setShowSettings(false)} 
           onSaved={() => setSettingsSavedTrigger(prev => prev + 1)}
+          themePreference={themePreference}
+          onThemeChange={(theme) => {
+            setThemePreference(theme)
+            void writeStorageFile(THEME_STORAGE_FILE, theme)
+          }}
+          currentLanguage={i18n.language}
+          onLanguageChange={(lang) => {
+            setLanguage(lang)
+          }}
         />
       )}
       

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Trash2, MoveRight, File, FolderOpen, Clock, HardDrive, X, Info, Cloud, Settings, Loader2, ArrowLeftRight } from 'lucide-react'
 import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography, Box, Chip, Checkbox, FormControlLabel, TextField, CircularProgress, LinearProgress, Snackbar, Alert } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import type { CleanupSuggestion } from '../services/ai-analysis'
 import { readStorageFile } from '../services/storage'
 import { hasCloudStorageConfig, getDefaultCloudStorageConfig, getEnabledCloudStorageConfigs, CLOUD_STORAGE_PROVIDERS, type CloudStorageConfig } from '../services/settings'
@@ -41,6 +42,7 @@ function parseSizeToBytes(sizeStr: string): number {
 }
 
 export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettings, selected = false, onSelectChange, task, onToggleAction, originalAction }: Props) {
+  const { t } = useTranslation()
   const [showConfirm, setShowConfirm] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -160,7 +162,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
   const ActionIcon = suggestion.action === 'delete' ? Trash2 : MoveRight
   const TypeIcon = suggestion.type === 'file' ? File : FolderOpen
   const actionColor = suggestion.action === 'delete' ? '#ef4444' : '#3b82f6'
-  const actionLabel = suggestion.action === 'delete' ? '删除' : '迁移'
+  const actionLabel = suggestion.action === 'delete' ? t('aiAnalysis.delete') : t('aiAnalysis.migrate')
   const fileName = suggestion.path.split(/[/\\]/).pop() || suggestion.path
   
   // 判断是否已切换操作类型
@@ -225,7 +227,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
               {/* 任务状态标签 */}
               {isTaskPending && (
                 <Chip 
-                  label="等待中"
+                  label={t('taskQueue.pending')}
                   size="small"
                   icon={<Loader2 size={12} className="animate-spin" />}
                   sx={{ 
@@ -240,7 +242,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
               )}
               {isTaskUploading && (
                 <Chip 
-                  label={`上传中 ${taskProgress}%`}
+                  label={t('taskQueue.uploading', { progress: taskProgress })}
                   size="small"
                   icon={<Loader2 size={12} className="animate-spin" />}
                   sx={{ 
@@ -307,7 +309,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                     color: 'text.disabled',
                   }
                 }}
-                title={isActionSwitched ? `已切换：${suggestion.action === 'delete' ? '删除' : '迁移'}` : `切换为${suggestion.action === 'delete' ? '迁移' : '删除'}`}
+                title={isActionSwitched ? t('suggestion.switched', { action: suggestion.action === 'delete' ? t('aiAnalysis.delete') : t('aiAnalysis.migrate') }) : t('suggestion.switchTo', { action: suggestion.action === 'delete' ? t('aiAnalysis.migrate') : t('aiAnalysis.delete') })}
               >
                 <ArrowLeftRight size={14} />
               </Button>
@@ -357,7 +359,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 }
               }}
             >
-              {loading ? '...' : isTaskPending ? '等待中' : isTaskUploading ? `上传中 ${taskProgress}%` : actionLabel}
+              {loading ? '...' : isTaskPending ? t('taskQueue.pending') : isTaskUploading ? t('taskQueue.uploading', { progress: taskProgress }) : actionLabel}
             </Button>
           </div>
         </div>
@@ -393,7 +395,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
               <ActionIcon size={20} style={{ color: actionColor }} />
             </Box>
             <Typography variant="h6" component="span" sx={{ fontSize: '16px', fontWeight: 700 }}>
-              确认{actionLabel}
+              {suggestion.action === 'delete' ? t('suggestion.confirmDelete') : t('suggestion.confirmMigrate')}
             </Typography>
           </Box>
         </DialogTitle>
@@ -420,12 +422,12 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 </Box>
               </Box>
               <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                正在上传到云存储...
+                {t('suggestion.uploadingToCloud')}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', textAlign: 'center' }}>
                 {selectedConfigs.length === 1 
-                  ? `上传到 ${selectedConfigs[0].name}` 
-                  : `上传到 ${selectedConfigs.length} 个云存储`}
+                  ? t('suggestion.uploadTo', { name: selectedConfigs[0].name })
+                  : t('suggestion.uploadToMultiple', { count: selectedConfigs.length })}
               </Typography>
               <LinearProgress 
                 sx={{ 
@@ -474,18 +476,20 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                   >
                     <Cloud size={14} className="shrink-0 mt-0.5" />
                     <Typography variant="caption" sx={{ fontSize: '11px' }}>
-                      将迁移到：{selectedConfigs.length === 1 ? selectedConfigs[0].name : `${selectedConfigs.length} 个云存储`}
+                      {selectedConfigs.length === 1 
+                        ? t('suggestion.willMigrateTo', { target: selectedConfigs[0].name })
+                        : t('suggestion.willMigrateTo', { target: t('suggestion.uploadToMultiple', { count: selectedConfigs.length }) })}
                     </Typography>
                   </Box>
                   
                   <TextField
                     fullWidth
                     size="small"
-                    label="云存储目标路径"
+                    label={t('suggestion.cloudTargetPath')}
                     value={cloudTargetPath}
                     onChange={(e) => setCloudTargetPath(e.target.value)}
-                    placeholder="例如：/备份/文档"
-                    helperText="文件将上传到云存储的此路径下"
+                    placeholder={t('suggestion.cloudTargetPathExample')}
+                    helperText={t('suggestion.cloudTargetPathHint')}
                     sx={{
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '8px',
@@ -540,7 +544,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 }
                 label={
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '11px' }} className="dark:text-gray-400">
-                    本次不再提醒
+                    {t('suggestion.dontAskAgain')}
                   </Typography>
                 }
                 sx={{ ml: 0, mt: 1 }}
@@ -564,7 +568,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
             }}
             className="dark:!border-gray-600 dark:!text-gray-300"
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleConfirm}
@@ -589,7 +593,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
               }
             }}
           >
-            {loading ? '处理中...' : `确认${actionLabel}`}
+            {loading ? t('suggestion.processing') : (suggestion.action === 'delete' ? t('suggestion.confirmDelete') : t('suggestion.confirmMigrate'))}
           </Button>
         </DialogActions>
       </Dialog>
@@ -625,10 +629,10 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
             </Box>
             <Box>
               <Typography variant="h6" component="span" sx={{ fontSize: '16px', fontWeight: 700 }}>
-                {actionLabel}建议详情
+                {t('suggestion.details')}
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }} className="dark:text-gray-400">
-                {suggestion.type === 'file' ? '文件' : '目录'}
+                {suggestion.type === 'file' ? t('common.file') : t('common.directory')}
               </Typography>
             </Box>
           </Box>
@@ -639,7 +643,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
             {/* 路径 */}
             <Box>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }} className="dark:text-gray-400">
-                路径
+                {t('suggestion.path')}
               </Typography>
               <Box 
                 sx={{ 
@@ -677,7 +681,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                   <HardDrive size={14} className="text-slate-400 dark:text-gray-500" />
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '10px' }} className="dark:text-gray-400">
-                    大小
+                    {t('suggestion.size')}
                   </Typography>
                 </Box>
                 <Typography variant="body1" sx={{ fontWeight: 700, fontSize: '18px' }} className="dark:text-gray-100">
@@ -698,7 +702,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                   <Clock size={14} className="text-slate-400 dark:text-gray-500" />
                   <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '10px' }} className="dark:text-gray-400">
-                    修改时间
+                    {t('suggestion.modifyTime')}
                   </Typography>
                 </Box>
                 <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '13px' }} className="dark:text-gray-100">
@@ -716,7 +720,7 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
               }}
             >
               <Typography variant="caption" sx={{ color: 'rgba(0,0,0,0.6)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                建议说明
+                {t('suggestion.description')}
               </Typography>
               <Typography variant="body2" sx={{ color: '#1A1A1A', fontSize: '13px', lineHeight: 1.6, mt: 0.5, fontWeight: 500 }}>
                 {suggestion.message}
@@ -739,10 +743,10 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
                   <Cloud size={16} className="shrink-0 mt-0.5" />
                   <Box>
                     <Typography variant="body2" sx={{ fontSize: '12px', fontWeight: 600 }}>
-                      将迁移到：{cloudConfigName}
+                      {t('suggestion.willMigrateTo', { target: cloudConfigName })}
                     </Typography>
                     <Typography variant="caption" sx={{ fontSize: '11px', opacity: 0.8 }}>
-                      文件将被移动到云存储
+                      {t('cloudStorage.fileMigrateHint')}
                     </Typography>
                   </Box>
                 </Box>

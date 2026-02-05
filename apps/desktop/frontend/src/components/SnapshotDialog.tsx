@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { showNotification } from '../services/notification'
 import {
   Dialog,
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
+  const { t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
   const [snapshots, setSnapshots] = useState<SnapshotMetadata[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +55,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
 
   const handleDelete = async (id: string, event: React.MouseEvent) => {
     event.stopPropagation()
-    if (confirm('确定要删除这个快照吗？')) {
+    if (confirm(t('snapshot.confirmDelete'))) {
       await deleteSnapshot(id)
       const updated = await loadSnapshots()
       setSnapshots(updated)
@@ -68,10 +70,10 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
         onLoadSnapshot(snapshot)
         onClose()
       } else {
-        showNotification('加载快照失败', '快照数据不存在')
+        showNotification(t('snapshot.loadFailed'), t('snapshot.dataNotExist'))
       }
     } catch (error) {
-      showNotification('加载快照失败', String(error))
+      showNotification(t('snapshot.loadFailed'), String(error))
     } finally {
       setLoading(false)
     }
@@ -127,10 +129,10 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
             </Box>
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '18px' }}>
-                快照管理
+                {t('snapshot.management')}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                共 {snapshots.length} 个快照
+                {t('snapshot.totalCount', { count: snapshots.length })}
               </Typography>
             </Box>
           </Box>
@@ -151,7 +153,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
         <TextField
           fullWidth
           size="small"
-          placeholder="搜索快照名称或路径..."
+          placeholder={t('snapshot.searchPlaceholder')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           sx={{
@@ -183,7 +185,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
           >
             <CircularProgress size={48} sx={{ mb: 2 }} />
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              加载快照中...
+              {t('snapshot.loading')}
             </Typography>
           </Box>
         ) : filteredSnapshots.length === 0 ? (
@@ -199,10 +201,10 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
           >
             <FolderOpen size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {searchQuery ? '未找到匹配的快照' : '还没有保存任何快照'}
+              {searchQuery ? t('snapshot.noMatch') : t('snapshot.noSnapshots')}
             </Typography>
             <Typography variant="caption" sx={{ mt: 0.5 }}>
-              {!searchQuery && '扫描完成后可以保存快照以便后续查看'}
+              {!searchQuery && t('snapshot.hint')}
             </Typography>
           </Box>
         ) : (
@@ -215,7 +217,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
                   mb: index < filteredSnapshots.length - 1 ? 1 : 0,
                 }}
                 secondaryAction={
-                  <Tooltip title="删除快照" arrow>
+                  <Tooltip title={t('snapshot.delete')} arrow>
                     <IconButton
                       edge="end"
                       onClick={(e) => handleDelete(snapshot.id, e)}
@@ -309,7 +311,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
                             }}
                           >
                             <FileStack size={12} />
-                            {snapshot.file_count.toLocaleString()} 个文件
+                            {t('snapshot.fileCount', { count: snapshot.file_count.toLocaleString() })}
                           </Typography>
                         </Box>
                       </Box>
