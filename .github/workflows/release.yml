@@ -89,7 +89,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './apps/desktop/src-tauri -> target'
+          workspaces: '. -> target'
 
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
@@ -129,12 +129,12 @@ jobs:
         shell: bash
         run: |
           echo "=== Listing target directory ==="
-          ls -la apps/desktop/src-tauri/target/${{ matrix.target }}/release/ || echo "Release directory not found"
+          ls -la target/${{ matrix.target }}/release/ || echo "Release directory not found"
           echo "=== Listing bundle directory ==="
-          ls -la apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/ || echo "Bundle directory not found"
-          if [ -d "apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle" ]; then
+          ls -la target/${{ matrix.target }}/release/bundle/ || echo "Bundle directory not found"
+          if [ -d "target/${{ matrix.target }}/release/bundle" ]; then
             echo "=== Bundle contents ==="
-            find apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle -type f
+            find target/${{ matrix.target }}/release/bundle -type f
           fi
 
       - name: Prepare release artifacts (Windows)
@@ -143,14 +143,18 @@ jobs:
         run: |
           $VERSION = "${{ needs.check-release.outputs.version }}"
           New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
-          $bundlePath = "apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          $bundlePath = "target/${{ matrix.target }}/release/bundle"
           
           Write-Host "Looking for installers in: $bundlePath"
           
           if (-not (Test-Path $bundlePath)) {
             Write-Host "ERROR: Bundle path does not exist!"
             Write-Host "Listing target directory..."
-            Get-ChildItem -Path "apps/desktop/src-tauri/target" -Recurse -Depth 3 | Select-Object FullName
+            if (Test-Path "target") {
+              Get-ChildItem -Path "target" -Recurse -Depth 4 | Select-Object FullName
+            } else {
+              Write-Host "target directory does not exist"
+            }
             exit 1
           }
           
@@ -182,14 +186,18 @@ jobs:
         run: |
           VERSION="${{ needs.check-release.outputs.version }}"
           mkdir -p release-artifacts
-          BUNDLE_PATH="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          BUNDLE_PATH="target/${{ matrix.target }}/release/bundle"
           
           echo "Looking for installers in: $BUNDLE_PATH"
           
           if [ ! -d "$BUNDLE_PATH" ]; then
             echo "ERROR: Bundle path does not exist!"
             echo "Listing target directory..."
-            find apps/desktop/src-tauri/target -maxdepth 4 -type d
+            if [ -d "target" ]; then
+              find target -maxdepth 5 -type d
+            else
+              echo "target directory does not exist"
+            fi
             exit 1
           fi
           
