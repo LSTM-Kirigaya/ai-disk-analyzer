@@ -109,7 +109,7 @@ jobs:
         run: npm install -g @tauri-apps/cli@latest
 
       - name: Build Tauri app
-        working-directory: apps/desktop/src-tauri
+        working-directory: apps/desktop
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -122,7 +122,8 @@ jobs:
           DROPBOX_CLIENT_ID: ${{ secrets.DROPBOX_CLIENT_ID }}
           DROPBOX_CLIENT_SECRET: ${{ secrets.DROPBOX_CLIENT_SECRET }}
         run: |
-          cargo tauri build ${{ matrix.args }}
+          npm install
+          npx tauri build ${{ matrix.args }}
 
       - name: List build output (Debug)
         shell: bash
