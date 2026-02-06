@@ -311,7 +311,7 @@ export function SnapshotDialog({ open, onClose, onLoadSnapshot }: Props) {
                             }}
                           >
                             <FileStack size={12} />
-                            {t('snapshot.fileCount', { count: snapshot.file_count.toLocaleString() })}
+                            {t('snapshot.fileCount', { count: snapshot.file_count })}
                           </Typography>
                         </Box>
                       </Box>
