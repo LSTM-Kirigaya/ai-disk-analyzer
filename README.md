@@ -10,15 +10,15 @@
     <img src="https://img.shields.io/badge/License-Apache%202.0-red?style=flat-square" alt="License" />
   </p>
 
-  让傻子用户也能像电脑糕手一样清理磁盘。
+  让小白用户也能像电脑糕手一样清理磁盘。
 
-  [快速开始](#快速开始) • [项目架构](#项目架构) • [开发计划](#开发计划) • [贡献指南](#贡献指南)
+  [快速开始](#功能预览) • [开发计划](#开发计划) • [QQ 群](https://qm.qq.com/cgi-bin/qm/qr?k=m_GRedABaOwTCseJQnKi_sjMlS_cIhtx&jump_from=webapi&authKey=BQn3melqNkir6iplZgohsxxyJ+FkR81CjCI5XXXEz/piAq0bDcI9W58VmBHx5o3p)
 </div>
 
 
 ---
 
-## 📸 功能预览
+## 功能预览
 
 通过 AI 智能分析磁盘占用，快速识别可清理或迁移的文件，让磁盘管理变得简单高效。
 
@@ -40,7 +40,7 @@
 
 ---
 
-## ✨ 核心特性
+## 核心特性
 
 - 🚀 **Rust 高性能扫描**：基于 Rust 核心构建，最高速度可达 1 秒扫描 5000 个文件，低内存占用，即使百万级文件也能流畅运行。
 - 🤖 **AI 智能分析**：扫描完成后由 AI 系统自动分析文件用途，智能决定哪些需要删除、哪些需要迁移，所有建议需用户确认确保安全。
@@ -49,7 +49,15 @@
 
 ---
 
-## 🚀 快速开始
+## 社区交流
+
+欢迎加入我们的 QQ 群，一起讨论 DiskRookie 的使用和开发！
+
+<a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=m_GRedABaOwTCseJQnKi_sjMlS_cIhtx&jump_from=webapi&authKey=BQn3melqNkir6iplZgohsxxyJ+FkR81CjCI5XXXEz/piAq0bDcI9W58VmBHx5o3p"><img border="0" src="//pub.idqqimg.com/wpa/images/group.png" alt="DiskRookie 磁盘菜鸟" title="DiskRookie 磁盘菜鸟"></a>
+
+---
+
+## 快速开始
 
 ### 🛠️ 环境准备
 
@@ -74,7 +82,7 @@ npm run dev
 
 ```
 
-### 📦 构建发布
+### 构建发布
 
 ```bash
 cd apps/desktop
@@ -83,7 +91,7 @@ npx tauri build --target x86_64-pc-windows-msvc
 
 ---
 
-## 🗺️ 开发计划
+## 开发计划
 
 我们正在积极开发以下功能，让 DiskRookie 变得更加强大和易用：
 
@@ -124,7 +132,7 @@ npx tauri build --target x86_64-pc-windows-msvc
 
 ---
 
-## 📄 许可证
+## 许可证
 
 本项目采用 [Apache License 2.0](https://www.google.com/search?q=LICENSE) 许可证。
 
