@@ -27,6 +27,7 @@ import {
   DEFAULT_SETTINGS,
   MODEL_PRESETS,
   API_URL_PRESETS,
+  getPresetId,
   fetchAvailableModels,
   testConnection,
   type AISettings as AISettingsType,
@@ -145,13 +146,14 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
     })
   }, [])
 
-  // 当 API Key 和 URL 都填写后，自动获取模型列表；加载完成后默认选中第一个模型
+  // 当当前厂商的 API Key 和 URL 都填写后，自动获取模型列表；加载完成后默认选中第一个模型
   useEffect(() => {
+    const keyForUrl = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? ''
     const loadModels = async () => {
-      if (settings.apiKey && settings.apiUrl) {
+      if (keyForUrl && settings.apiUrl) {
         setLoadingModels(true)
         try {
-          const models = await fetchAvailableModels(settings.apiUrl, settings.apiKey)
+          const models = await fetchAvailableModels(settings.apiUrl, keyForUrl)
           setAvailableModels(models)
           if (models.length > 0) {
             const sorted = [...models].sort((a, b) => a.id.localeCompare(b.id))
@@ -172,11 +174,15 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
     // 延迟加载，避免频繁请求
     const timer = setTimeout(loadModels, 500)
     return () => clearTimeout(timer)
-  }, [settings.apiKey, settings.apiUrl])
+  }, [settings.apiUrl, settings.providerApiKeys])
 
   const handleSave = async () => {
     try {
-      await saveSettings(settings)
+      // 保存时带上按厂商解析后的 apiKey（供 loadSettings 之外使用）及 providerApiKeys
+      await saveSettings({
+        ...settings,
+        apiKey: (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? '',
+      })
       await saveAppSettings(appSettings)
       setSaved(true)
       // 通知父组件保存成功
@@ -211,6 +217,9 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
 
   const isCustomUrl = !API_URL_PRESETS.some(p => p.value === settings.apiUrl && p.value !== 'custom')
   const isCustomModel = !MODEL_PRESETS.some(p => p.value === settings.model && p.value !== 'custom')
+
+  // 当前选中的厂商对应的 API Key（独立存储，切换厂商显示各自的 key）
+  const currentApiKey = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? ''
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center rounded-[12px] z-50">
@@ -325,8 +334,11 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                   fullWidth
                   size="small"
                   type={showApiKey ? 'text' : 'password'}
-                  value={settings.apiKey}
-                  onChange={(e) => setSettings(s => ({ ...s, apiKey: e.target.value }))}
+                  value={currentApiKey}
+                  onChange={(e) => setSettings(s => ({
+                    ...s,
+                    providerApiKeys: { ...(s.providerApiKeys ?? {}), [getPresetId(s.apiUrl)]: e.target.value },
+                  }))}
                   placeholder={t('settings.inputApiKey')}
                   InputProps={{
                     endAdornment: (
@@ -349,7 +361,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                   {t('settings.apiKeyHint')}
                 </FormHelperText>
                 {/* 测试连接 - 填写了 API Key、地址和模型后显示，响应信息显示在按钮右侧 */}
-                {settings.apiKey && settings.apiUrl && settings.model && (
+                {currentApiKey && settings.apiUrl && settings.model && (
                   <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mt: 0.5, flexWrap: 'wrap' }}>
                     <Button
                       variant="outlined"
@@ -359,7 +371,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                         setTestResult(null)
                         setTestingConnection(true)
                         try {
-                          const result = await testConnection(settings)
+                          const result = await testConnection({ ...settings, apiKey: currentApiKey })
                           setTestResult(result)
                           if (!result.ok) {
                             showNotification(t('settings.testConnectionFailed'), result.message)
@@ -391,8 +403,8 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                 )}
               </Box>
 
-              {/* 模型选择 - 只有填写了 API Key 才显示 */}
-              {settings.apiKey && (
+              {/* 模型选择 - 只有填写了当前厂商的 API Key 才显示 */}
+              {currentApiKey && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
                     {t('settings.model')}

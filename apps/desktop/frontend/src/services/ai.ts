@@ -5,6 +5,8 @@ import { readJSON, writeJSON, readStorageFile, writeStorageFile } from './storag
 export interface AISettings {
   apiUrl: string
   apiKey: string
+  /** 按厂商/预设独立存储的 API Key，键为 getPresetId 返回的 id */
+  providerApiKeys?: Record<string, string>
   model: string
   temperature: number
   maxTokens: number
@@ -59,6 +61,7 @@ export interface ChatCompletionResponse {
 export const DEFAULT_SETTINGS: AISettings = {
   apiUrl: 'https://api.openai.com/v1',
   apiKey: '',
+  providerApiKeys: {},
   model: 'gpt-4o-mini',
   temperature: 0.7,
   maxTokens: 2048,
@@ -79,23 +82,46 @@ export const MODEL_PRESETS = [
   { label: '自定义', value: 'custom', provider: '' },
 ]
 
-// API URL 预设
+// API URL 预设（id 用于独立存储各厂商的 API Key）
 export const API_URL_PRESETS = [
-  { label: 'OpenAI', value: 'https://api.openai.com/v1' },
-  { label: 'Anthropic (Claude)', value: 'https://api.anthropic.com/v1' },
-  { label: 'DeepSeek', value: 'https://api.deepseek.com/v1' },
-  { label: '阿里云 DashScope', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { label: 'Azure OpenAI', value: 'https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT' },
-  { label: '本地 Ollama', value: 'http://localhost:11434/v1' },
-  { label: '自定义', value: 'custom' },
+  { id: 'openai', label: 'OpenAI', value: 'https://api.openai.com/v1' },
+  { id: 'anthropic', label: 'Anthropic (Claude)', value: 'https://api.anthropic.com/v1' },
+  { id: 'deepseek', label: 'DeepSeek', value: 'https://api.deepseek.com/v1' },
+  { id: 'aliyun', label: '阿里云 DashScope', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { id: 'azure', label: 'Azure OpenAI', value: 'https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT' },
+  { id: 'ollama', label: '本地 Ollama', value: 'http://localhost:11434/v1' },
+  { id: 'custom', label: '自定义', value: 'custom' },
 ]
+
+/** 根据 apiUrl 得到预设 id，用于读写 providerApiKeys */
+export function getPresetId(apiUrl: string): string {
+  if (!apiUrl || apiUrl.trim() === '') return 'custom'
+  const preset = API_URL_PRESETS.find(p => p.value !== 'custom' && p.value === apiUrl.trim())
+  return preset ? preset.id : 'custom'
+}
 
 const SETTINGS_FILE = 'settings.json'
 const SYSTEM_PROMPT_FILE = 'system-prompt.txt'
 
-// 加载设置
+// 加载设置（从 providerApiKeys 解析出当前 apiUrl 对应的 apiKey；兼容旧配置）
 export async function loadSettings(): Promise<AISettings> {
-  return await readJSON<AISettings>(SETTINGS_FILE, DEFAULT_SETTINGS)
+  const raw = await readJSON<AISettings & { providerApiKeys?: Record<string, string> }>(SETTINGS_FILE, DEFAULT_SETTINGS)
+  let providerApiKeys = raw.providerApiKeys ?? {}
+
+  // 兼容旧数据：若没有 providerApiKeys 但有 apiKey，按当前 apiUrl 写入对应预设
+  if (Object.keys(providerApiKeys).length === 0 && (raw.apiKey ?? '').trim() !== '') {
+    const presetId = getPresetId(raw.apiUrl)
+    providerApiKeys = { [presetId]: raw.apiKey }
+  }
+
+  const presetId = getPresetId(raw.apiUrl)
+  const apiKey = providerApiKeys[presetId] ?? ''
+
+  return {
+    ...raw,
+    providerApiKeys,
+    apiKey,
+  }
 }
 
 // 保存设置
