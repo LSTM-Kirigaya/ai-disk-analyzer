@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::FileNode;
+use crate::TopFileEntry;
 
 /// 扫描结果，包含树结构与各项指标
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,4 +20,7 @@ pub struct ScanResult {
     /// 卷剩余可用空间（字节），由 GetDiskFreeSpaceEx 获取
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub volume_free_bytes: Option<u64>,
+    /// 按大小排序的前 N 个文件（MFT 扫描时填充），供前端摘要与 AI 分析使用，避免遍历整棵树
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_files: Option<Vec<TopFileEntry>>,
 }

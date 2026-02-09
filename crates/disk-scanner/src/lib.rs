@@ -11,4 +11,5 @@ pub use filters::*;
 pub use ai_disk_domain::ScanResult;
 
 #[cfg(windows)]
-pub use mft_scan::{scan_volume_mft_top_files, TopFileEntry, TOP_FILES_DEFAULT_N};
+pub use mft_scan::{scan_volume_mft_top_files, TOP_FILES_DEFAULT_N};
+pub use ai_disk_domain::TopFileEntry;

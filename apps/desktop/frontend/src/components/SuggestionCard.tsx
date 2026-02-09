@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Trash2, MoveRight, File, FolderOpen, Clock, HardDrive, X, Info, Cloud, Settings, Loader2, ArrowLeftRight } from 'lucide-react'
-import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography, Box, Chip, Checkbox, FormControlLabel, TextField, CircularProgress, LinearProgress, Snackbar, Alert } from '@mui/material'
+import { Trash2, MoveRight, File, FolderOpen, Clock, HardDrive, X, Info, Cloud, Settings, Loader2, ArrowLeftRight, Shield } from 'lucide-react'
+import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography, Box, Chip, Checkbox, FormControlLabel, TextField, CircularProgress, LinearProgress, Snackbar, Alert, Tooltip } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+import { invoke } from '@tauri-apps/api/core'
 import type { CleanupSuggestion } from '../services/ai-analysis'
 import { readStorageFile } from '../services/storage'
 import { hasCloudStorageConfig, getDefaultCloudStorageConfig, getEnabledCloudStorageConfigs, CLOUD_STORAGE_PROVIDERS, type CloudStorageConfig } from '../services/settings'
@@ -20,6 +21,7 @@ interface Props {
   task?: Task  // 关联的任务，用于显示状态
   onToggleAction?: () => void  // 切换操作类型（删除 <-> 迁移）
   originalAction?: 'delete' | 'move'  // 原始操作类型，用于判断是否已切换
+  onAddToSafeList?: (path: string) => void  // 加入安全名单（点击后由父组件弹窗确认）
 }
 
 // 解析文件大小字符串为字节数
@@ -41,7 +43,7 @@ function parseSizeToBytes(sizeStr: string): number {
   return Math.floor(value * (units[unit] || 1))
 }
 
-export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettings, selected = false, onSelectChange, task, onToggleAction, originalAction }: Props) {
+export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettings, selected = false, onSelectChange, task, onToggleAction, originalAction, onAddToSafeList }: Props) {
   const { t } = useTranslation()
   const [showConfirm, setShowConfirm] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
@@ -335,6 +337,31 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
             >
               <Info size={14} />
             </Button>
+            {onAddToSafeList && (
+              <Tooltip title={t('safeList.addToSafeList')} arrow>
+                <Button
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onAddToSafeList(suggestion.path)
+                  }}
+                  sx={{
+                    minWidth: 'auto',
+                    px: 1,
+                    py: 0.5,
+                    fontSize: '11px',
+                    textTransform: 'none',
+                    color: 'text.secondary',
+                    borderRadius: '6px',
+                    '&:hover': {
+                      bgcolor: 'action.hover',
+                    }
+                  }}
+                >
+                  <Shield size={14} />
+                </Button>
+              </Tooltip>
+            )}
             <Button
               size="small"
               onClick={handleActionClick}
@@ -640,30 +667,45 @@ export function SuggestionCard({ suggestion, onDelete, onMove, onOpenCloudSettin
         
         <DialogContent sx={{ py: 2, px: 3 }} className="dark:text-gray-100">
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-            {/* 路径 */}
+            {/* 路径（点击在文件管理器中打开所在目录） */}
             <Box>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }} className="dark:text-gray-400">
                 {t('suggestion.path')}
               </Typography>
-              <Box 
-                sx={{ 
-                  mt: 0.75,
-                  p: 1.5, 
-                  bgcolor: 'action.hover', 
-                  borderRadius: '8px',
-                  border: '1px solid',
-                  borderColor: 'divider',
-                }}
-                className="dark:!bg-gray-700/50 dark:!border-gray-600"
-              >
-                <Typography 
-                  variant="body2" 
-                  sx={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', lineHeight: 1.5 }}
-                  className="dark:text-gray-200"
+              <Tooltip title={t('suggestion.openInFileManager')} placement="top">
+                <Box
+                  onClick={async () => {
+                    try {
+                      await invoke('open_in_file_manager', {
+                        path: suggestion.path,
+                        isFile: suggestion.type === 'file',
+                      })
+                    } catch (err) {
+                      setToastMessage(String(err))
+                      setToastOpen(true)
+                    }
+                  }}
+                  sx={{
+                    mt: 0.75,
+                    p: 1.5,
+                    bgcolor: 'action.hover',
+                    borderRadius: '8px',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.selected' },
+                  }}
+                  className="dark:!bg-gray-700/50 dark:!border-gray-600"
                 >
-                  {suggestion.path}
-                </Typography>
-              </Box>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', lineHeight: 1.5 }}
+                    className="dark:text-gray-200"
+                  >
+                    {suggestion.path}
+                  </Typography>
+                </Box>
+              </Tooltip>
             </Box>
 
             {/* 信息网格 */}

@@ -56,6 +56,7 @@ pub fn run() {
             commands::oauth::get_dropbox_quota,
             // Cloud upload commands
             commands::cloud_upload::upload_to_cloud,
+            commands::open_in_file_manager::open_in_file_manager,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

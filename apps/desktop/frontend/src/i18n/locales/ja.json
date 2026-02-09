@@ -169,6 +169,7 @@
     "confirmMigrate": "移行を確認",
     "details": "提案の詳細",
     "path": "パス",
+    "openInFileManager": "エクスプローラー / Finder で開く",
     "size": "サイズ",
     "modifyTime": "更新日時",
     "description": "説明",
@@ -279,6 +280,18 @@
     "executeComplete": "バッチ実行完了",
     "successCount": "{{count}}件を正常に処理しました",
     "successAndFailed": "{{success}}件成功、{{failed}}件失敗"
+  },
+  "safeList": {
+    "addToSafeList": "セーフリストに追加",
+    "confirmTitle": "セーフリストに追加",
+    "confirmMessage": "このパスをセーフリストに追加します。セーフリスト内のパスはAIに送るファイル一覧に含まれず、表の行数は設定どおり大きい順に補われます。",
+    "dontRemindAgain": "今後表示しない",
+    "manageSafeList": "セーフリストを管理",
+    "manageSafeListHint": "セーフリスト内のパスはAI分析のファイル一覧に表示されません",
+    "safeListTitle": "セーフリスト",
+    "addPath": "パスを追加",
+    "addPathPlaceholder": "パスを入力して追加",
+    "emptySafeList": "セーフリストにパスがありません"
   },
   "language": {
     "title": "言語",

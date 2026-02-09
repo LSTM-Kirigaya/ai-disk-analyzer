@@ -367,7 +367,7 @@ pub fn scan_path_with_progress(
         match crate::mft_scan::scan_volume_mft(path, progress.clone(), shallow_dirs) {
             Ok(result) => return Ok((result, true)),
             Err(e) => {
-                let msg = e.to_string();
+                let msg: String = e.to_string();
                 eprintln!(
                     "[scan] MFT scan unavailable, falling back to normal walk. reason: {} (on Windows, reading $MFT often needs admin)",
                     msg
@@ -407,6 +407,7 @@ pub fn scan_path_with_progress(
             scan_warning: mft_fallback_reason,
             volume_total_bytes,
             volume_free_bytes,
+            top_files: None,
         },
         false,
     ))

@@ -36,7 +36,9 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-use ai_disk_scanner::{scan_path_with_progress, scan_volume_mft_top_files, FileNode, ScanResult};
+use ai_disk_scanner::{scan_path_with_progress, FileNode, ScanResult};
+#[cfg(windows)]
+use ai_disk_scanner::scan_volume_mft_top_files;
 
 /// 默认扫描盘符：F 盘
 const DEFAULT_SCAN_PATH: &str = "F:\\";
@@ -137,6 +139,7 @@ fn scan_timing_mft_vs_normal() {
                     scan_warning: None,
                     volume_total_bytes: None,
                     volume_free_bytes: None,
+                    top_files: None,
                 },
                 false,
             )),

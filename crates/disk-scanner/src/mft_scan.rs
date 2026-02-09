@@ -17,19 +17,28 @@ use std::collections::{BinaryHeap, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
 use ai_disk_common::DiskAnalyzerError;
-use ai_disk_domain::{FileNode, ScanResult};
+use ai_disk_domain::{FileNode, ScanResult, TopFileEntry};
+use ntfs_reader::aligned_reader::open_volume;
+use ntfs_reader::api::NtfsAttributeType;
 use ntfs_reader::errors::NtfsReaderError;
 use ntfs_reader::file_info::{FileInfo, HashMapCache};
-use ntfs_reader::mft::Mft;
+use ntfs_reader::mft::{Mft, MftRef, MftStreamChunk};
 use ntfs_reader::volume::Volume;
 use rayon::prelude::*;
 
 use crate::scanner::{normalize_path, ProgressCb, ProgressCbArc, SHALLOW_DIR_NAMES};
+
+/// 生产者-消费者队列消息：先发记录大小、Bitmap、Volume，再发 $DATA 流式块，以便消费者边收边用 MftRef 迭代并上报文件数。
+enum MftLoadMessage {
+    RecordSize(u64),
+    Bitmap(Vec<u8>),
+    Volume(Volume),
+    DataChunk(MftStreamChunk),
+}
 
 /// 通过 Windows API GetDiskFreeSpaceExW 获取卷总容量与剩余空间（字节）。
 /// 仅 Windows 有效；path 为卷上任意路径（如 "C:\" 或 "C:\Users"）。
@@ -130,9 +139,15 @@ fn normalize_ntfs_path(path_str: &str, drive: &str) -> String {
 
 const MAX_DEPTH: usize = 10;
 const MAX_CHILDREN_PER_DIR: usize = 500;
-const PROGRESS_EVERY: u64 = 5000;
-/// 阶段 3 并行化：每块记录数，用于 build_recursive_size_map / build_child_index 的分块
-const PAR_CHUNK_SIZE: usize = 80_000;
+/// 返回给前端的树与 Treemap 一致：只保留 6 层、每层最多 250 子节点，减小 payload 与解析时间
+const MAX_DEPTH_RETURN: usize = 6;
+const MAX_CHILDREN_PER_DIR_RETURN: usize = 250;
+/// 进度回调间隔（增大以略减 IPC 次数）
+const PROGRESS_EVERY: u64 = 10_000;
+/// build_tree 阶段每构建多少节点上报一次进度
+const BUILD_TREE_PROGRESS_EVERY: u64 = 10_000;
+/// 供前端摘要与 AI 分析的前 N 大文件数量
+const TOP_FILES_FOR_RESULT: usize = 500;
 
 /// Check if path is under volume (ASCII case-insensitive prefix match).
 #[inline]
@@ -176,14 +191,6 @@ pub fn is_windows_volume_root(path: &Path) -> bool {
 
 /// 「前 N 大文件」功能的默认 N（如 100）。
 pub const TOP_FILES_DEFAULT_N: usize = 100;
-
-/// 单条「按大小排序」结果：路径、大小、修改时间（仅文件，不含目录）。
-#[derive(Debug, Clone)]
-pub struct TopFileEntry {
-    pub path: String,
-    pub size: u64,
-    pub modified: Option<u64>,
-}
 
 /// 仅获取卷上按文件大小最大的前 N 个**文件**（不含目录）。
 /// 优化：枚举时用最小堆维护前 N，**不构建整棵树**，省去阶段 3，内存仅 O(N)。
@@ -264,6 +271,51 @@ struct MftRecord {
     modified: Option<u64>,
 }
 
+/// 从直接大小与子索引一次性汇总递归大小（避免枚举时每文件 O(深度) 的祖先更新）
+fn compute_recursive_sizes(
+    records: &[MftRecord],
+    child_index: &HashMap<String, Vec<usize>>,
+    direct_sizes: &HashMap<String, u64>,
+    volume_root_trim: &str,
+    volume_root_key: &str,
+) -> HashMap<String, u64> {
+    let mut paths: Vec<String> = records
+        .iter()
+        .map(|r| r.full_path.trim_end_matches('\\').to_string())
+        .collect();
+    if !paths.iter().any(|p| p.eq_ignore_ascii_case(volume_root_trim)) {
+        paths.push(volume_root_trim.to_string());
+    }
+    paths.sort();
+    paths.dedup();
+    paths.sort_by_cached_key(|p| std::cmp::Reverse(p.matches('\\').count()));
+    let mut recursive_sizes: HashMap<String, u64> = HashMap::new();
+    for path in paths {
+        let direct = direct_sizes.get(&path).copied().unwrap_or(0);
+        let child_sum: u64 = {
+            let key = if path.eq_ignore_ascii_case(volume_root_trim) {
+                volume_root_key
+            } else {
+                &path
+            };
+            child_index
+                .get(key)
+                .map(|indices| {
+                    indices
+                        .iter()
+                        .map(|&i| {
+                            let c = records[i].full_path.trim_end_matches('\\').to_string();
+                            recursive_sizes.get(&c).copied().unwrap_or(0)
+                        })
+                        .sum()
+                })
+                .unwrap_or(0)
+        };
+        recursive_sizes.insert(path, direct.saturating_add(child_sum));
+    }
+    recursive_sizes
+}
+
 /// Scan volume root via MFT using ntfs-reader (Everything-style). Opens `\\.\X:`,
 /// reads $MFT into memory, iterates files with path cache, then builds tree.
 pub fn scan_volume_mft(
@@ -298,71 +350,216 @@ pub fn scan_volume_mft(
         cb(0, "[scan:mft] opening volume...");
     }
     let volume_path = format!(r"\\.\{}:", drive);
-    let volume = Volume::new(volume_path.as_str()).map_err(to_disk_analyzer_error)?;
-    eprintln!("[scan:mft] volume opened: {} bytes", volume.volume_size);
-    // 边读边向前端上报进度：channel + 后台线程调用 progress，主线程用带 progress 的 closure 调 new_with_progress（需 'static）
-    let mft = if let Some(ref progress_arc) = progress {
-        let (tx, rx) = mpsc::channel();
-        let tx_arc = Arc::new(Mutex::new(tx));
-        let load_progress = move |bytes: u64, total: u64| {
-            let _ = tx_arc.lock().unwrap().send((bytes, total));
-        };
-        let progress_arc = Arc::clone(progress_arc);
-        let join_handle = thread::spawn(move || {
-            while let Ok((bytes, total)) = rx.recv() {
-                let pct = if total > 0 { (100u64 * bytes / total).min(100) } else { 0 };
-                progress_arc(0, &format!("[scan:mft] Loading MFT {}%", pct));
-            }
+    let volume_root_trim = format!("{}:", drive);
+    let volume_root_key = format!(r"{}:\", drive);
+    // 全流程只打开卷一次：主线程打开并读 MFT record 0，再把同一 reader 交给生产者读 Bitmap 与 $DATA，避免多线程/多次打开导致 corrupt MFT record。
+    // 有 progress 时边读边用 MftRef 迭代并上报文件数；否则读完后一次性 iterate_files。两种路径均得到 (volume, records, child_index, direct_sizes, n_records)，再汇总为 recursive_sizes。
+    let (_volume, records, child_index, direct_sizes, n_records) = if let Some(ref progress_arc) = progress {
+        let volume = Volume::new(volume_path.as_str()).map_err(to_disk_analyzer_error)?;
+        eprintln!("[scan:mft] volume opened: {} bytes", volume.volume_size);
+        let mut reader = open_volume(&volume.path)
+            .map_err(NtfsReaderError::IOError)
+            .map_err(to_disk_analyzer_error)?;
+        let record = Mft::get_record_fs(
+            &mut reader,
+            volume.file_record_size as usize,
+            volume.mft_position,
+        )
+        .map_err(to_disk_analyzer_error)?;
+        const QUEUE_CAP: usize = 4;
+        let (tx, rx) = mpsc::sync_channel::<MftLoadMessage>(QUEUE_CAP);
+        let volume_for_consumer = volume.clone();
+        let producer_handle = thread::spawn(move || -> Result<(), DiskAnalyzerError> {
+            let _ = tx.send(MftLoadMessage::RecordSize(volume.file_record_size));
+            let bitmap = Mft::read_data_fs(&volume, &mut reader, &record, NtfsAttributeType::Bitmap, None)
+                .map_err(to_disk_analyzer_error)?
+                .ok_or_else(|| DiskAnalyzerError::InvalidPath("missing $BITMAP".to_string()))?;
+            let _ = tx.send(MftLoadMessage::Bitmap(bitmap));
+            let _ = tx.send(MftLoadMessage::Volume(volume_for_consumer));
+            Mft::stream_data_attribute_to(&volume, &mut reader, &record, |chunk| {
+                let _ = tx.send(MftLoadMessage::DataChunk(chunk));
+            })
+            .map_err(to_disk_analyzer_error)?;
+            drop(tx);
+            Ok(())
         });
-        let mft_res = Mft::new_with_progress(volume, Some(&load_progress as &ntfs_reader::mft::MftLoadProgress))
-            .map_err(to_disk_analyzer_error);
-        // load_progress 离开作用域时 tx 被关闭，接收线程退出；等待以便最后几条进度能发出
-        drop(load_progress);
-        let _ = join_handle.join();
-        mft_res
+        const FIRST_NORMAL_RECORD: u64 = 24;
+        let vol_trim_for_filter = format!("{}:", drive);
+        let mut records: Vec<MftRecord> = Vec::with_capacity(2_000_000);
+        let mut child_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut direct_sizes: HashMap<String, u64> = HashMap::new();
+        let mut cache = HashMapCache::default();
+        let counter = AtomicU64::new(0);
+        let mut data = Vec::new();
+        let mut total_size = 0u64;
+        let mut record_size: u64 = 0;
+        let mut bitmap: Option<Vec<u8>> = None;
+        let mut volume_from_producer: Option<Volume> = None;
+        let mut last_record_index: u64 = 0;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                MftLoadMessage::RecordSize(rs) => record_size = rs,
+                MftLoadMessage::Bitmap(b) => bitmap = Some(b),
+                MftLoadMessage::Volume(v) => volume_from_producer = Some(v),
+                MftLoadMessage::DataChunk(MftStreamChunk::TotalSize(t)) => {
+                    total_size = t;
+                    data.reserve(t as usize);
+                }
+                MftLoadMessage::DataChunk(MftStreamChunk::Data(v)) => {
+                    data.extend_from_slice(&v);
+                    let rs = record_size as usize;
+                    let start_idx = last_record_index;
+                    if rs > 0 {
+                        if let Some(ref bitmask) = bitmap {
+                            let n = data.len() / rs;
+                            let n_u64 = n as u64;
+                            for i in start_idx..n_u64 {
+                                let start = i as usize * rs;
+                                let end = start + rs;
+                                if end > data.len() {
+                                    break;
+                                }
+                                if let Err(_) = Mft::fixup_record(i, &mut data[start..end]) {
+                                    continue;
+                                }
+                                if i < FIRST_NORMAL_RECORD {
+                                    continue;
+                                }
+                                let bitmap_idx = (i / 8) as usize;
+                                if bitmap_idx >= bitmask.len() {
+                                    continue;
+                                }
+                                if (bitmask[bitmap_idx] & (1u8 << (i % 8) as u8)) == 0 {
+                                    continue;
+                                }
+                            }
+                            last_record_index = n_u64;
+                            if let Some(ref vol) = volume_from_producer {
+                                let mft_ref = MftRef::new(vol, &data, bitmask);
+                                mft_ref.iterate_files_range(start_idx, n_u64, |file| {
+                                    let info = FileInfo::with_cache(&mft_ref, file, &mut cache);
+                                    let path_str = info.path.to_string_lossy();
+                                    let full_path = normalize_ntfs_path(&path_str, &drive);
+                                    if !path_under_volume_ascii(&full_path, &vol_trim_for_filter) {
+                                        return;
+                                    }
+                                    let modified = info.modified.and_then(|t| {
+                                        let s = t.unix_timestamp();
+                                        if s > 0 { Some(s as u64) } else { None }
+                                    });
+                                    let c = counter.fetch_add(1, Ordering::Relaxed);
+                                    if c > 0 && c % PROGRESS_EVERY == 0 {
+                                        progress_arc(c, &full_path);
+                                    }
+                                    records.push(MftRecord {
+                                        full_path: full_path.clone(),
+                                        size: info.size,
+                                        is_dir: info.is_directory,
+                                        modified,
+                                    });
+                                    let idx = records.len() - 1;
+                                    let path_trim = full_path.trim_end_matches('\\');
+                                    if !path_trim.eq_ignore_ascii_case(&volume_root_trim) {
+                                        if let Some(i) = full_path.rfind('\\') {
+                                            let parent = full_path[..i].to_string();
+                                            child_index.entry(parent).or_default().push(idx);
+                                        }
+                                    }
+                                    let s = info.size;
+                                    direct_sizes
+                                        .entry(path_trim.to_string())
+                                        .and_modify(|v| *v = v.saturating_add(s))
+                                        .or_insert(s);
+                                });
+                            }
+                        }
+                    }
+                    let pct = if total_size > 0 {
+                        (100u64 * data.len() as u64 / total_size).min(100)
+                    } else {
+                        0
+                    };
+                    progress_arc(counter.load(Ordering::Relaxed), &format!("[scan:mft] Loading MFT {}%", pct));
+                }
+            }
+        }
+        let volume = volume_from_producer.ok_or_else(|| {
+            DiskAnalyzerError::InvalidPath("MFT volume not received from producer".to_string())
+        })?;
+        let _bitmap = bitmap.ok_or_else(|| {
+            DiskAnalyzerError::InvalidPath("MFT bitmap not received".to_string())
+        })?;
+        producer_handle.join().map_err(|_| {
+            DiskAnalyzerError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "MFT producer thread panicked",
+            ))
+        })??;
+        let n_records = counter.load(Ordering::Relaxed);
+        if let Some(ref cb) = progress {
+            cb(n_records, &volume_root_str);
+        }
+        Ok((volume, records, child_index, direct_sizes, n_records))
     } else {
-        Mft::new_with_progress(volume, None).map_err(to_disk_analyzer_error)
-    }?;
-    eprintln!("[scan:mft] MFT loaded into memory, max_records={}", mft.max_record);
-    let t_after_mft_read = Instant::now();
-
-    // 过滤时使用与 normalize 后路径一致的卷前缀（如 "C:"），避免 canonical 的 "\\?\C:" 过滤掉所有记录
-    let vol_trim_for_filter = format!("{}:", drive);
-    let mut records: Vec<MftRecord> = Vec::with_capacity(2_000_000);
-    let mut cache = HashMapCache::default();
-    let counter = AtomicU64::new(0);
-
-    mft.iterate_files(|file| {
-        let info = FileInfo::with_cache(&mft, file, &mut cache);
-        let path_str = info.path.to_string_lossy();
-        let full_path = normalize_ntfs_path(&path_str, &drive);
-        if !path_under_volume_ascii(&full_path, &vol_trim_for_filter) {
-            return;
-        }
-        let modified = info.modified.and_then(|t| {
-            let s = t.unix_timestamp();
-            if s > 0 { Some(s as u64) } else { None }
-        });
-        let c = counter.fetch_add(1, Ordering::Relaxed);
-        if c > 0 && c % PROGRESS_EVERY == 0 {
-            if let Some(ref cb) = progress {
-                cb(c, &full_path);
+        let volume = Volume::new(volume_path.as_str()).map_err(to_disk_analyzer_error)?;
+        eprintln!("[scan:mft] volume opened: {} bytes", volume.volume_size);
+        let mft = Mft::new_with_progress(volume, None).map_err(to_disk_analyzer_error)?;
+        eprintln!("[scan:mft] MFT loaded into memory, max_records={}", mft.max_record);
+        let vol_trim_for_filter = format!("{}:", drive);
+        let mut records: Vec<MftRecord> = Vec::with_capacity(2_000_000);
+        let mut child_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut direct_sizes: HashMap<String, u64> = HashMap::new();
+        let mut cache = HashMapCache::default();
+        let counter = AtomicU64::new(0);
+        mft.iterate_files(|file| {
+            let info = FileInfo::with_cache(&mft, file, &mut cache);
+            let path_str = info.path.to_string_lossy();
+            let full_path = normalize_ntfs_path(&path_str, &drive);
+            if !path_under_volume_ascii(&full_path, &vol_trim_for_filter) {
+                return;
             }
-        }
-        records.push(MftRecord {
-            full_path,
-            size: info.size,
-            is_dir: info.is_directory,
-            modified,
+            let modified = info.modified.and_then(|t| {
+                let s = t.unix_timestamp();
+                if s > 0 { Some(s as u64) } else { None }
+            });
+            let c = counter.fetch_add(1, Ordering::Relaxed);
+            if c > 0 && c % PROGRESS_EVERY == 0 {
+                if let Some(ref cb) = progress {
+                    cb(c, &full_path);
+                }
+            }
+            records.push(MftRecord {
+                full_path: full_path.clone(),
+                size: info.size,
+                is_dir: info.is_directory,
+                modified,
+            });
+            let idx = records.len() - 1;
+            let path_trim = full_path.trim_end_matches('\\');
+            if !path_trim.eq_ignore_ascii_case(&volume_root_trim) {
+                if let Some(i) = full_path.rfind('\\') {
+                    let parent = full_path[..i].to_string();
+                    child_index.entry(parent).or_default().push(idx);
+                }
+            }
+            let s = info.size;
+            direct_sizes
+                .entry(path_trim.to_string())
+                .and_modify(|v| *v = v.saturating_add(s))
+                .or_insert(s);
         });
-    });
-
-    if let Some(ref cb) = progress {
-        cb(counter.load(Ordering::Relaxed), &volume_root_str);
-    }
-    let n_records = counter.load(Ordering::Relaxed);
-    eprintln!("[scan:mft] iterate done: {} records collected", n_records);
-    let t_after_iterate = Instant::now();
+        let n_records = counter.load(Ordering::Relaxed);
+        Ok::<_, DiskAnalyzerError>((mft.volume.clone(), records, child_index, direct_sizes, n_records))
+    }?;
+    let recursive_sizes = compute_recursive_sizes(
+        &records,
+        &child_index,
+        &direct_sizes,
+        &volume_root_trim,
+        &volume_root_key,
+    );
+    let t_after_mft_read = Instant::now();
+    let t_after_iterate = t_after_mft_read;
 
     // 与标准模式一致：根节点 name/path 与 scan_path_with_progress -> build_tree 一致
     let root_name = path_buf
@@ -372,16 +569,17 @@ pub fn scan_volume_mft(
         .unwrap_or_else(|| path.to_string());
     let root_path_str = path_buf.display().to_string();
 
-    // 与 normalize 后路径一致：根为 "C:"，index 父键为 "C:\"
-    let volume_root_trim = format!("{}:", drive);
-    let volume_root_key = format!(r"{}:\", drive);
     let (root, file_count, total_size) = build_tree_from_mft_records(
         &records,
+        &child_index,
+        &recursive_sizes,
         &volume_root_trim,
         &volume_root_key,
         &root_name,
         &root_path_str,
         shallow_dirs,
+        progress.as_ref(),
+        n_records,
     )?;
     let t_after_build_tree = Instant::now();
     let scan_time_ms = start.elapsed().as_millis() as u64;
@@ -412,126 +610,60 @@ pub fn scan_volume_mft(
             None => (None, None),
         };
 
+    let root_pruned = prune_tree_for_display(root, 0);
+    let top_files = Some(build_top_files_from_records(&records, TOP_FILES_FOR_RESULT));
+
     Ok(ScanResult {
-        root,
+        root: root_pruned,
         scan_time_ms,
         file_count,
         total_size,
         scan_warning: None,
         volume_total_bytes,
         volume_free_bytes,
+        top_files,
     })
 }
 
-type ChildIndex<'a> = HashMap<String, Vec<&'a MftRecord>>;
-
-/// 为每个路径及其所有祖先路径累加大小（多线程分块后合并）。
-fn build_recursive_size_map(records: &[MftRecord]) -> HashMap<String, u64> {
-    if records.is_empty() {
-        return HashMap::new();
-    }
-    records
-        .par_chunks(PAR_CHUNK_SIZE)
-        .map(|chunk| {
-            let mut map: HashMap<String, u64> = HashMap::new();
-            for r in chunk {
-                let path = r.full_path.trim_end_matches('\\').to_string();
-                if path.is_empty() {
-                    continue;
-                }
-                let s = r.size;
-                map.entry(path.clone())
-                    .and_modify(|v| *v = v.saturating_add(s))
-                    .or_insert(s);
-                let mut rest = path.as_str();
-                while let Some(i) = rest.rfind('\\') {
-                    rest = &rest[..i];
-                    if rest.is_empty() {
-                        break;
-                    }
-                    map.entry(rest.to_string())
-                        .and_modify(|v| *v = v.saturating_add(s))
-                        .or_insert(s);
-                }
-            }
-            map
-        })
-        .reduce(HashMap::new, |mut a, b| {
-            for (k, v) in b {
-                *a.entry(k).or_insert(0u64) = a.get(&k).copied().unwrap_or(0u64).saturating_add(v);
-            }
-            a
-        })
-}
-
-/// 多线程分块建 parent -> children index，再合并。
-fn build_child_index<'a>(
-    records: &'a [MftRecord],
-    volume_root_trim: &str,
-) -> (u64, Option<u64>, ChildIndex<'a>) {
-    let root = records.iter().find(|r| {
-        r.full_path.trim_end_matches('\\').eq_ignore_ascii_case(volume_root_trim)
-    });
-    let (root_size, root_modified) = root
-        .map(|r| (r.size, r.modified))
-        .unwrap_or((0u64, None));
-
-    let index = if records.is_empty() {
-        HashMap::new()
-    } else {
-        records
-            .par_chunks(PAR_CHUNK_SIZE)
-            .map(|chunk| {
-                let mut idx: ChildIndex<'_> = HashMap::new();
-                for r in chunk {
-                    let p = r.full_path.as_str();
-                    let norm = p.trim_end_matches('\\');
-                    if norm.eq_ignore_ascii_case(volume_root_trim) {
-                        continue;
-                    }
-                    if let Some(i) = p.rfind('\\') {
-                        idx.entry(p[..i].to_string()).or_default().push(r);
-                    }
-                }
-                idx
-            })
-            .reduce(HashMap::new, |mut a, b| {
-                for (k, mut v) in b {
-                    a.entry(k).or_default().append(&mut v);
-                }
-                a
-            })
-    };
-    (root_size, root_modified, index)
-}
-
+/// 从 records + index( indices ) 取根节点信息，再构建子树；建树过程中用 display_count 上报进度，避免前端数字回跳。
 fn build_tree_from_mft_records(
     records: &[MftRecord],
+    child_index: &HashMap<String, Vec<usize>>,
+    recursive_sizes: &HashMap<String, u64>,
     volume_root_trim: &str,
     volume_root_key: &str,
     root_name: &str,
     root_path_str: &str,
     shallow_dirs: bool,
+    progress: Option<&ProgressCbArc>,
+    display_count: u64,
 ) -> Result<(FileNode, u64, u64), DiskAnalyzerError> {
-    let (root_size, root_modified, index) = build_child_index(records, volume_root_trim);
-    let recursive_sizes = build_recursive_size_map(records);
-    // 根的直接子节点在 index 里键为 "F:"（p[..i] 对 "F:\x" 得到 "F:"），不是 "F:\"；故先查 volume_root_key 再查 volume_root_trim
-    let direct_children: &[&MftRecord] = index
+    let root_record = records.iter().find(|r| {
+        r.full_path.trim_end_matches('\\').eq_ignore_ascii_case(volume_root_trim)
+    });
+    let (root_size, root_modified) = root_record
+        .map(|r| (r.size, r.modified))
+        .unwrap_or((0u64, None));
+
+    let direct_indices: Vec<usize> = child_index
         .get(volume_root_key)
-        .or_else(|| index.get(volume_root_trim))
-        .map(|v| v.as_slice())
+        .or_else(|| child_index.get(volume_root_trim))
         .or_else(|| {
-            index
+            child_index
                 .keys()
                 .find(|k| k.eq_ignore_ascii_case(volume_root_key) || k.eq_ignore_ascii_case(volume_root_trim))
-                .and_then(|k| index.get(k))
-                .map(|v| v.as_slice())
+                .and_then(|k| child_index.get(k))
         })
-        .unwrap_or(&[]);
+        .cloned()
+        .unwrap_or_default();
 
-    let child_nodes: Vec<FileNode> = direct_children
+    let nodes_built = AtomicU64::new(0);
+    let last_reported = AtomicU64::new(0);
+
+    let child_nodes: Vec<FileNode> = direct_indices
         .par_iter()
-        .map(|rec| {
+        .map(|&idx| {
+            let rec = &records[idx];
             let name = rec
                 .full_path
                 .rsplit('\\')
@@ -557,13 +689,18 @@ fn build_tree_from_mft_records(
                     children: vec![],
                 }
             } else {
-                let (node, _cnt) = build_subtree_from_index(
-                    &index,
-                    &recursive_sizes,
+                let (node, _cnt) = build_subtree_from_indices(
+                    records,
+                    child_index,
+                    recursive_sizes,
                     path,
                     name,
                     1,
                     shallow_dirs,
+                    &nodes_built,
+                    &last_reported,
+                    progress,
+                    display_count,
                 );
                 node
             }
@@ -595,25 +732,79 @@ fn count_nodes(n: &FileNode) -> u64 {
     1 + n.children.iter().map(count_nodes).sum::<u64>()
 }
 
-fn build_subtree_from_index(
-    index: &ChildIndex<'_>,
+/// 剪枝树以匹配前端 Treemap（深度 6、每层最多 250 子节点，按 size 取 top），减小 payload 与解析时间
+fn prune_tree_for_display(root: FileNode, depth: usize) -> FileNode {
+    if depth >= MAX_DEPTH_RETURN {
+        return FileNode {
+            path: root.path,
+            name: root.name,
+            size: root.size,
+            is_dir: root.is_dir,
+            modified: root.modified,
+            children: vec![],
+        };
+    }
+    let mut children = root.children;
+    if children.len() > MAX_CHILDREN_PER_DIR_RETURN {
+        children.sort_by(|a, b| b.size.cmp(&a.size));
+        children.truncate(MAX_CHILDREN_PER_DIR_RETURN);
+    }
+    let children: Vec<FileNode> = children
+        .into_iter()
+        .map(|c| prune_tree_for_display(c, depth + 1))
+        .collect();
+    FileNode {
+        path: root.path,
+        name: root.name,
+        size: root.size,
+        is_dir: root.is_dir,
+        modified: root.modified,
+        children,
+    }
+}
+
+/// 从 records 中取前 N 大文件（仅文件，不含目录），供前端摘要与 AI 分析
+fn build_top_files_from_records(records: &[MftRecord], n: usize) -> Vec<TopFileEntry> {
+    let mut files: Vec<(&MftRecord, u64)> = records
+        .iter()
+        .filter(|r| !r.is_dir)
+        .map(|r| (r, r.size))
+        .collect();
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+    files
+        .into_iter()
+        .take(n)
+        .map(|(r, _)| TopFileEntry {
+            path: r.full_path.clone(),
+            size: r.size,
+            modified: r.modified,
+        })
+        .collect()
+}
+
+/// 使用 indices 版 index 建子树，并周期性上报进度（用 display_count 保持前端数字不变），避免前端长时间无响应。
+fn build_subtree_from_indices(
+    records: &[MftRecord],
+    index: &HashMap<String, Vec<usize>>,
     recursive_sizes: &HashMap<String, u64>,
     path_prefix: &str,
     name: &str,
     depth: usize,
     shallow_dirs: bool,
+    nodes_built: &AtomicU64,
+    last_reported: &AtomicU64,
+    progress: Option<&ProgressCbArc>,
+    display_count: u64,
 ) -> (FileNode, u64) {
-    let children_slice = index
-        .get(path_prefix)
-        .map(|v| v.as_slice())
-        .unwrap_or(&[]);
+    let children_indices = index.get(path_prefix).map(|v| v.as_slice()).unwrap_or(&[]);
     let mut size = 0u64;
     let mut file_count = 0u64;
     let modified: Option<u64> = None;
 
     let mut children: Vec<FileNode> =
-        Vec::with_capacity(children_slice.len().min(MAX_CHILDREN_PER_DIR));
-    for rec in children_slice {
+        Vec::with_capacity(children_indices.len().min(MAX_CHILDREN_PER_DIR));
+    for &idx in children_indices {
+        let rec = &records[idx];
         if rec.full_path.eq_ignore_ascii_case(path_prefix) {
             continue;
         }
@@ -644,13 +835,18 @@ fn build_subtree_from_index(
                 children: vec![],
             });
         } else if depth < MAX_DEPTH {
-            let (child_node, cnt) = build_subtree_from_index(
+            let (child_node, cnt) = build_subtree_from_indices(
+                records,
                 index,
                 recursive_sizes,
                 child_path,
                 child_name,
                 depth + 1,
                 shallow_dirs,
+                nodes_built,
+                last_reported,
+                progress,
+                display_count,
             );
             size += child_node.size;
             file_count += cnt;
@@ -669,6 +865,16 @@ fn build_subtree_from_index(
         }
         if children.len() >= MAX_CHILDREN_PER_DIR {
             break;
+        }
+    }
+
+    let cur = nodes_built.fetch_add(1, Ordering::Relaxed) + 1;
+    if let Some(ref cb) = progress {
+        let last = last_reported.load(Ordering::Relaxed);
+        if cur.saturating_sub(last) >= BUILD_TREE_PROGRESS_EVERY
+            && last_reported.compare_exchange(last, cur, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+        {
+            cb(display_count, "[scan:mft] building tree...");
         }
     }
 

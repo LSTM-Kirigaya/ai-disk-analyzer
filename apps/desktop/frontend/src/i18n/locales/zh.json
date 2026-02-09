@@ -168,6 +168,7 @@
     "confirmMigrate": "确认迁移",
     "details": "建议详情",
     "path": "路径",
+    "openInFileManager": "在文件管理器中打开所在目录",
     "size": "大小",
     "modifyTime": "修改时间",
     "description": "建议说明",
@@ -278,6 +279,18 @@
     "executeComplete": "批量执行完成",
     "successCount": "成功处理 {{count}} 个项目",
     "successAndFailed": "成功 {{success}} 个，失败 {{failed}} 个"
+  },
+  "safeList": {
+    "addToSafeList": "加入安全名单",
+    "confirmTitle": "加入安全名单",
+    "confirmMessage": "此操作会将该路径加入安全名单。安全名单中的路径不会出现在后续发给 AI 的建议表格中；表格行数仍按您设置的数量从大到小补足。",
+    "dontRemindAgain": "不再提醒",
+    "manageSafeList": "管理安全名单",
+    "manageSafeListHint": "安全名单中的路径不会出现在 AI 分析的文件列表中",
+    "safeListTitle": "安全名单",
+    "addPath": "添加路径",
+    "addPathPlaceholder": "输入或粘贴路径后点击添加",
+    "emptySafeList": "暂无安全名单路径"
   },
   "language": {
     "title": "语言",

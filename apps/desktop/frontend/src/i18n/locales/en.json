@@ -168,6 +168,7 @@
     "confirmMigrate": "Confirm Migrate",
     "details": "Suggestion Details",
     "path": "Path",
+    "openInFileManager": "Open in File Explorer / Finder",
     "size": "Size",
     "modifyTime": "Modified Time",
     "description": "Description",
@@ -278,6 +279,18 @@
     "executeComplete": "Batch execution complete",
     "successCount": "Successfully processed {{count}} items",
     "successAndFailed": "{{success}} succeeded, {{failed}} failed"
+  },
+  "safeList": {
+    "addToSafeList": "Add to safe list",
+    "confirmTitle": "Add to safe list",
+    "confirmMessage": "This will add the path to the safe list. Paths in the safe list will not appear in the file table sent to AI; the table will still show the number of rows you set, filled from largest to smallest.",
+    "dontRemindAgain": "Don't remind again",
+    "manageSafeList": "Manage safe list",
+    "manageSafeListHint": "Paths in the safe list will not appear in the AI analysis file list",
+    "safeListTitle": "Safe list",
+    "addPath": "Add path",
+    "addPathPlaceholder": "Enter or paste path, then click Add",
+    "emptySafeList": "No paths in safe list"
   },
   "language": {
     "title": "Language",

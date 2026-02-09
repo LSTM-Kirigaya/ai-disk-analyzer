@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud, Settings, Wifi } from 'lucide-react'
+import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud, Settings, Wifi, Shield, Trash2 } from 'lucide-react'
 import { showNotification } from '../services/notification'
 import {
   TextField,
@@ -22,6 +22,13 @@ import {
   CircularProgress,
   Tabs,
   Tab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
 } from '@mui/material'
 import {
   loadSettings,
@@ -39,6 +46,7 @@ import { loadAppSettings, saveAppSettings, type AppSettings } from '../services/
 import { CloudStorageSettings } from './CloudStorageSettings'
 import { setLanguage, supportedLanguages } from '../i18n'
 import { readStorageFile, writeStorageFile } from '../services/storage'
+import { loadSafeListPaths, saveSafeListPaths } from '../services/safeList'
 
 interface Props {
   onClose: () => void
@@ -93,6 +101,9 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState(initialTab)
+  const [showSafeListDialog, setShowSafeListDialog] = useState(false)
+  const [safeListPaths, setSafeListPaths] = useState<string[]>([])
+  const [newSafeListPath, setNewSafeListPath] = useState('')
   
   // 主题和语言状态（如果外部传入则使用外部值，否则使用内部状态）
   const [internalThemePreference, setInternalThemePreference] = useState<'light' | 'dark' | 'system'>('system')
@@ -427,22 +438,24 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                       >
                         {/* 显示从 API 获取的模型 */}
                         {availableModels.length > 0 ? (
-                          availableModels
-                            .sort((a, b) => a.id.localeCompare(b.id))
-                            .map((model) => (
-                              <MenuItem key={model.id} value={model.id}>
-                                {model.id}
-                              </MenuItem>
-                            ))
+                          <>
+                            {availableModels
+                              .sort((a, b) => a.id.localeCompare(b.id))
+                              .map((model) => (
+                                <MenuItem key={model.id} value={model.id}>
+                                  {model.id}
+                                </MenuItem>
+                              ))}
+                            <MenuItem value="custom">{t('common.custom')}</MenuItem>
+                          </>
                         ) : (
-                          // 如果没有获取到模型，显示预设模型
+                          // 如果没有获取到模型，显示预设模型（已包含「自定义」项，不再重复添加）
                           MODEL_PRESETS.map((preset) => (
                             <MenuItem key={preset.value} value={preset.value}>
                               {preset.provider ? `${preset.label} (${preset.provider})` : preset.label}
                             </MenuItem>
                           ))
                         )}
-                        <MenuItem value="custom">{t('common.custom')}</MenuItem>
                       </Select>
                     </FormControl>
                   )}
@@ -642,9 +655,124 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                   {t('settings.useMftScanHint')}
                 </FormHelperText>
               </Box>
+
+              {/* 安全名单管理 */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'text.secondary' }}>
+                  {t('safeList.safeListTitle')}
+                </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<Shield size={16} />}
+                  onClick={async () => {
+                    const paths = await loadSafeListPaths()
+                    setSafeListPaths(paths)
+                    setNewSafeListPath('')
+                    setShowSafeListDialog(true)
+                  }}
+                  sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                >
+                  {t('safeList.manageSafeList')}
+                </Button>
+                <FormHelperText sx={{ mt: -0.5, ml: 0 }}>
+                  {t('safeList.manageSafeListHint')}
+                </FormHelperText>
+              </Box>
             </Box>
           </TabPanel>
         </div>
+
+        {/* 安全名单管理对话框 */}
+        <Dialog
+          open={showSafeListDialog}
+          onClose={() => setShowSafeListDialog(false)}
+          maxWidth="sm"
+          fullWidth
+          PaperProps={{ sx: { borderRadius: '16px' } }}
+        >
+          <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Shield size={20} />
+            {t('safeList.safeListTitle')}
+          </DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {t('safeList.manageSafeListHint')}
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder={t('safeList.addPathPlaceholder')}
+                value={newSafeListPath}
+                onChange={(e) => setNewSafeListPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const p = newSafeListPath.trim()
+                    if (p) {
+                      const next = [...safeListPaths, p]
+                      setSafeListPaths(next)
+                      void saveSafeListPaths(next)
+                      setNewSafeListPath('')
+                    }
+                  }
+                }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+              />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => {
+                  const p = newSafeListPath.trim()
+                  if (p) {
+                    const next = [...safeListPaths, p]
+                    setSafeListPaths(next)
+                    void saveSafeListPaths(next)
+                    setNewSafeListPath('')
+                  }
+                }}
+                sx={{ borderRadius: '10px', textTransform: 'none', flexShrink: 0 }}
+              >
+                {t('safeList.addPath')}
+              </Button>
+            </Box>
+            {safeListPaths.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                {t('safeList.emptySafeList')}
+              </Typography>
+            ) : (
+              <List dense sx={{ bgcolor: 'action.hover', borderRadius: 1, maxHeight: 280, overflow: 'auto' }}>
+                {safeListPaths.map((pathItem) => (
+                  <ListItem
+                    key={pathItem}
+                    secondaryAction={
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        onClick={() => {
+                          const next = safeListPaths.filter((p) => p !== pathItem)
+                          setSafeListPaths(next)
+                          void saveSafeListPaths(next)
+                        }}
+                        aria-label={t('common.delete')}
+                      >
+                        <Trash2 size={16} />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText primary={pathItem} primaryTypographyProps={{ variant: 'body2', sx: { wordBreak: 'break-all' } }} />
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setShowSafeListDialog(false)} sx={{ borderRadius: '10px', textTransform: 'none' }}>
+              {t('common.close')}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* 底部按钮 */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }} className="dark:!bg-gray-700/50 dark:!border-gray-600">

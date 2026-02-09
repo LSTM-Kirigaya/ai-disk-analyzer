@@ -4,8 +4,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
 import { showNotification } from '../services/notification'
-import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save, Cloud, Play } from 'lucide-react'
-import { Button, TextField, Typography, Fade, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, Slider, Box, FormHelperText } from '@mui/material'
+import { Folder, Cpu, MessageSquare, Copy, CheckCircle2, AlertCircle, Settings, Clock, FileStack, HardDrive, Sparkles, Save, Cloud, Play, Shield } from 'lucide-react'
+import { Button, TextField, Typography, Fade, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, Slider, Box, FormHelperText, Checkbox, FormControlLabel } from '@mui/material'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { Treemap, type TreemapNode } from './Treemap'
 import { formatBytes, formatDuration } from '../utils/format'
@@ -14,9 +14,17 @@ import { analyzeWithAI, deleteItem, type AnalysisResult } from '../services/ai-a
 import { SuggestionCard } from './SuggestionCard'
 import { saveSnapshot, type Snapshot } from '../services/snapshot'
 import { readStorageFile, writeStorageFile } from '../services/storage'
-import { loadAppSettings, getEnabledCloudStorageConfigs, CLOUD_STORAGE_PROVIDERS, type CloudStorageConfig } from '../services/settings'
+import { loadAppSettings, saveAppSettings, getEnabledCloudStorageConfigs, CLOUD_STORAGE_PROVIDERS, type CloudStorageConfig } from '../services/settings'
+import { loadSafeListPaths, isPathInSafeList, addToSafeList } from '../services/safeList'
 import { CloudStorageSelector } from './CloudStorageSelector'
 import type { Task } from '../services/taskQueue'
+
+/** 按大小排序的前 N 大文件条目（MFT 扫描时由后端填充） */
+interface TopFileEntry {
+    path: string
+    size: number
+    modified?: number | null
+}
 
 interface ScanResult {
     root: TreemapNode
@@ -29,6 +37,8 @@ interface ScanResult {
     volume_total_bytes?: number | null
     /** 卷剩余可用空间（字节） */
     volume_free_bytes?: number | null
+    /** 按大小排序的前 N 大文件，供摘要与 AI 分析用，避免遍历整棵树 */
+    top_files?: TopFileEntry[] | null
 }
 
 const PROMPT_INSTRUCTION_FILE = 'prompt-instruction.txt'
@@ -47,8 +57,7 @@ function isWindowsVolumeRoot(p: string): boolean {
   return /^[A-Za-z]:\\$/.test(normalized)
 }
 const DEFAULT_PROMPT_INSTRUCTION = '请根据以上占用，简要指出可安全清理或迁移的大项，并给出操作建议。'
-const FILE_COUNT_FILE = 'prompt-file-count.txt'
-const DEFAULT_FILE_COUNT = 100
+const SKIP_SAFELIST_CONFIRM_KEY = 'skip-add-to-safelist-confirm'
 
 async function loadPromptInstruction(): Promise<string> {
     try {
@@ -65,27 +74,6 @@ async function savePromptInstruction(instruction: string): Promise<void> {
     }
 }
 
-async function loadFileCount(maxFileCount: number): Promise<number> {
-    try {
-        const stored = await readStorageFile(FILE_COUNT_FILE)
-        const count = parseInt(stored, 10)
-        if (!isNaN(count) && count >= 10 && count <= maxFileCount) {
-            return count
-        }
-        return Math.min(DEFAULT_FILE_COUNT, maxFileCount)
-    } catch {
-        return Math.min(DEFAULT_FILE_COUNT, maxFileCount)
-    }
-}
-
-async function saveFileCount(fileCount: number): Promise<void> {
-    try {
-        await writeStorageFile(FILE_COUNT_FILE, fileCount.toString())
-    } catch {
-        // ignore storage errors
-    }
-}
-
 /** AI 提示面板 */
 function AIPromptPanel({ result }: { result: ScanResult }) {
     const { t } = useTranslation()
@@ -96,11 +84,12 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
     const maxFileCount = Math.max(10, result.file_count)
     const [fileCount, setFileCount] = useState(() => Math.min(100, maxFileCount))
 
-    // 加载保存的文件数量（仅在 maxFileCount 变化时）
+    // 加载保存的表格行数（与设置中的「Prompt 文件数量」共用，存于 app-settings.json）
     useEffect(() => {
         let cancelled = false
-        loadFileCount(maxFileCount).then(count => {
+        loadAppSettings().then(s => {
             if (!cancelled) {
+                const count = Math.min(maxFileCount, Math.max(10, s.promptFileCount))
                 setFileCount(count)
             }
         })
@@ -109,10 +98,10 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
         }
     }, [maxFileCount])
 
-    // 保存文件数量到本地
+    // 表格行数变化时保存到应用设置（本地持久化，普通模式发给 AI 的 prompt 也会用该值）
     useEffect(() => {
         if (fileCount >= 10 && fileCount <= maxFileCount) {
-            void saveFileCount(fileCount)
+            loadAppSettings().then(s => void saveAppSettings({ ...s, promptFileCount: fileCount }))
         }
     }, [fileCount, maxFileCount])
 
@@ -193,9 +182,30 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                             {t('aiAnalysis.tableRows')}
                         </Typography>
-                        <Typography variant="caption" sx={{ color: 'text.primary', fontSize: '11px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                            {fileCount}
-                        </Typography>
+                        <TextField
+                            size="small"
+                            value={fileCount}
+                            onChange={(e) => {
+                                const raw = e.target.value.replace(/\D/g, '')
+                                if (raw === '') {
+                                    setFileCount(10)
+                                    return
+                                }
+                                const v = parseInt(raw, 10)
+                                if (!isNaN(v)) {
+                                    const clamped = Math.min(maxFileCount, Math.max(10, v))
+                                    setFileCount(clamped)
+                                }
+                            }}
+                            inputProps={{
+                                inputMode: 'numeric',
+                                style: { textAlign: 'right', fontSize: '12px', fontWeight: 700, width: 56 },
+                            }}
+                            sx={{
+                                '& .MuiInputBase-root': { fontSize: '12px' },
+                                '& input': { py: 0.5, fontVariantNumeric: 'tabular-nums' },
+                            }}
+                        />
                     </Box>
                     <Slider
                         min={10}
@@ -219,9 +229,7 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                         }}
                         marks={[
                             { value: 10, label: '10' },
-                            ...(maxFileCount >= 100 ? [{ value: 100, label: '100' }] : []),
-                            ...(maxFileCount > 100 ? [{ value: maxFileCount, label: maxFileCount.toString() }] : 
-                                 maxFileCount < 100 ? [{ value: maxFileCount, label: maxFileCount.toString() }] : []),
+                            ...(maxFileCount > 10 ? [{ value: maxFileCount, label: maxFileCount.toString() }] : []),
                         ]}
                     />
                     <FormHelperText sx={{ fontSize: '10px', m: 0, mt: 0.5, color: 'text.secondary' }}>
@@ -297,23 +305,39 @@ async function buildFileListSummary(result: ScanResult, fileCount?: number): Pro
     if (fileCount === undefined) {
         const settings = await loadAppSettings()
         fileCount = settings.promptFileCount
-    }    
-
-    // 确保 fileCount 是有效的数字
-    const count = fileCount;
-
-    const nodes: { path: string; size: number; modified?: number | null }[] = []
-    function collect(n: TreemapNode, depth: number) {
-        if (depth > 20) return
-        if (!n.is_dir) nodes.push({ path: n.path || n.name, size: n.size, modified: n.modified })
-        if (n.children?.length) {
-            [...n.children].sort((a, b) => b.size - a.size).slice(0, 10).forEach((c) => collect(c, depth + 1))
-        }
     }
-    collect(result.root, 0)
-    const items = nodes.sort((a, b) => b.size - a.size).slice(0, count)
+
+    const count = fileCount
+    let candidates: { path: string; size: number; modified?: number | null }[]
+
+    // 优先使用后端提供的 top_files（MFT 扫描时已按大小排序），先取全部候选，再按安全名单过滤并补足行数
+    if (result.top_files && result.top_files.length > 0) {
+        candidates = result.top_files.map((n) => ({
+            path: n.path,
+            size: n.size,
+            modified: n.modified ?? null,
+        }))
+    } else {
+        const nodes: { path: string; size: number; modified?: number | null }[] = []
+        function collect(n: TreemapNode, depth: number) {
+            if (depth > 20) return
+            if (!n.is_dir) nodes.push({ path: n.path || n.name, size: n.size, modified: n.modified })
+            if (n.children?.length) {
+                [...n.children].sort((a, b) => b.size - a.size).slice(0, 10).forEach((c) => collect(c, depth + 1))
+            }
+        }
+        collect(result.root, 0)
+        candidates = nodes.sort((a, b) => b.size - a.size)
+    }
+
+    // 排除安全名单中的路径，再取前 count 条，保证表格行数为用户设定且仍按大小从大到小
+    const safeList = await loadSafeListPaths()
+    const items = candidates
+        .filter((n) => !isPathInSafeList(n.path, safeList))
+        .slice(0, count)
+
     const header = '| 路径 | 大小 | 最近修改时间 |\n| --- | --- | --- |\n'
-    const rows = items.map(n => `| ${displayPath(n.path)} | ${formatBytes(n.size)} | ${formatModified(n.modified)} |`).join('\n')
+    const rows = items.map((n) => `| ${displayPath(n.path)} | ${formatBytes(n.size)} | ${formatModified(n.modified)} |`).join('\n')
     return `[磁盘分析结果]\n总大小: ${formatBytes(result.total_size)}，文件数: ${result.file_count}\n\n${header}${rows}`
 }
 
@@ -356,6 +380,11 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [snapshotName, setSnapshotName] = useState('')
 
+    // 加入安全名单确认对话框
+    const [safeListDialog, setSafeListDialog] = useState<{ open: boolean; path: string | null; dontRemind: boolean }>({ open: false, path: null, dontRemind: false })
+    // 本页已加入安全名单的路径，从右侧列表中隐藏（不删数据，仅不展示）
+    const [addedToSafeListPaths, setAddedToSafeListPaths] = useState<Set<string>>(new Set())
+
     // 云存储选择相关状态
     const [showCloudSelector, setShowCloudSelector] = useState(false)
     const [availableConfigs, setAvailableConfigs] = useState<CloudStorageConfig[]>([])
@@ -394,12 +423,12 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
             const res = await invoke<ScanResult>('scan_path_command', { path: pathToScan, shallowDirs, useMft })
             setResult(res); setStatus('done');
 
-            // 标准模式：扫描完成后自动调用 AI 分析
+            // 标准模式：扫描完成后自动调用 AI 分析，表格行数使用用户设置并已保存的本地位（与设置中的「Prompt 文件数量」一致）
             if (isAdmin === false) {
                 setAiAnalyzing(true)
                 setAiProgress(t('aiAnalysis.preparing'))
                 try {
-                    const summary = await buildFileListSummary(res)
+                    const summary = await buildFileListSummary(res, appSettings.promptFileCount)
                     const aiResult = await analyzeWithAI(summary, (msg) => setAiProgress(msg))
                     setAnalysisResult(aiResult)
                     // AI分析完成后显示系统通知（Windows右下角/macOS右上角）
@@ -469,6 +498,32 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         return actionOverrides.get(path) || originalAction
     }, [actionOverrides])
 
+    // 点击「加入安全名单」：若用户勾选过「不再提醒」则直接加入并从列表移除，否则弹窗确认
+    const handleAddToSafeListClick = useCallback(async (itemPath: string) => {
+        const skipConfirm = await readStorageFile(SKIP_SAFELIST_CONFIRM_KEY)
+        if (skipConfirm === 'true') {
+            await addToSafeList(itemPath)
+            setAddedToSafeListPaths((prev) => new Set([...prev, itemPath]))
+            return
+        }
+        setSafeListDialog({ open: true, path: itemPath, dontRemind: false })
+    }, [])
+
+    // 安全名单确认对话框：确认后加入并可选「不再提醒」，并从右侧列表中移除该条
+    const handleSafeListConfirm = useCallback(async () => {
+        const { path: itemPath, dontRemind } = safeListDialog
+        if (!itemPath) {
+            setSafeListDialog({ open: false, path: null, dontRemind: false })
+            return
+        }
+        await addToSafeList(itemPath)
+        setAddedToSafeListPaths((prev) => new Set([...prev, itemPath]))
+        if (dontRemind) {
+            await writeStorageFile(SKIP_SAFELIST_CONFIRM_KEY, 'true')
+        }
+        setSafeListDialog({ open: false, path: null, dontRemind: false })
+    }, [safeListDialog])
+
     // 解析文件大小字符串为字节数
     const parseSizeToBytes = (sizeStr: string): number => {
         const match = sizeStr.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)$/i)
@@ -493,7 +548,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         if (!analysisResult) return
         
         const allPaths = analysisResult.suggestions
-            .filter(s => !deletedPaths.has(s.path))
+            .filter(s => !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path))
             .filter(s => {
                 const actualAction = getActualAction(s.path, s.action)
                 return actionFilter === 'all' || actualAction === actionFilter
@@ -507,7 +562,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         } else {
             setSelectedItems(new Set(allPaths))
         }
-    }, [analysisResult, deletedPaths, actionFilter, selectedItems, getActualAction])
+    }, [analysisResult, deletedPaths, addedToSafeListPaths, actionFilter, selectedItems, getActualAction])
 
     const handleMove = useCallback(async (itemPath: string, configs?: CloudStorageConfig[], targetPath?: string, fileSize?: number) => {
         // 使用传入的 configs 或全局设置的 selectedMigrationConfigs
@@ -594,7 +649,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         if (selectedItems.size === 0 || !analysisResult) return
         
         const itemsToProcess = analysisResult.suggestions.filter(s => 
-            selectedItems.has(s.path) && !deletedPaths.has(s.path)
+            selectedItems.has(s.path) && !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path)
         )
 
         // 检查是否有迁移操作且没有配置云存储（使用实际的操作类型）
@@ -641,7 +696,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
         
         // 清空选中状态
         setSelectedItems(new Set())
-    }, [selectedItems, analysisResult, deletedPaths, handleDelete, handleMove, selectedMigrationConfigs, getActualAction])
+    }, [selectedItems, analysisResult, deletedPaths, addedToSafeListPaths, handleDelete, handleMove, selectedMigrationConfigs, getActualAction])
 
     // 保存快照
     const handleSaveSnapshot = useCallback(() => {
@@ -918,7 +973,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                 {/* 一键全选/取消全选按钮 */}
                                 {analysisResult && (() => {
                                     const visibleItems = analysisResult.suggestions
-                                        .filter(s => !deletedPaths.has(s.path))
+                                        .filter(s => !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path))
                                         .filter(s => actionFilter === 'all' || s.action === actionFilter)
                                     if (visibleItems.length === 0) return null
                                     const allSelected = visibleItems.every(s => selectedItems.has(s.path))
@@ -1024,9 +1079,6 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                     <div className="text-center">
                         <Typography variant="h4" sx={{ fontWeight: 900, color: 'secondary.main' }}>{progressFiles.toLocaleString()}</Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 2 }}>{t('expertMode.processedFiles')}</Typography>
-                        {progressMessage && (
-                            <Typography variant="caption" display="block" sx={{ color: 'primary.main', mt: 1, fontFamily: 'monospace' }}>{progressMessage}</Typography>
-                        )}
                     </div>
                     <div className="flex gap-1 h-2">
                         {Array.from({ length: 12 }).map((_, i) => (
@@ -1133,11 +1185,11 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                     {(() => {
                                         const deleteSuggestions = analysisResult.suggestions.filter(s => {
                                             const actualAction = getActualAction(s.path, s.action)
-                                            return actualAction === 'delete' && !deletedPaths.has(s.path)
+                                            return actualAction === 'delete' && !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path)
                                         })
                                         const moveSuggestions = analysisResult.suggestions.filter(s => {
                                             const actualAction = getActualAction(s.path, s.action)
-                                            return actualAction === 'move' && !deletedPaths.has(s.path)
+                                            return actualAction === 'move' && !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path)
                                         })
 
                                         // 解析大小字符串为字节数
@@ -1158,11 +1210,15 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
 
                                         const deleteSize = deleteSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
                                         const moveSize = moveSuggestions.reduce((sum, s) => sum + parseSize(s.size), 0)
-                                        const totalSize = result?.total_size || 1
-                                        const remainSize = Math.max(0, totalSize - deleteSize - moveSize)
-                                        const deletePercent = ((deleteSize / totalSize) * 100).toFixed(1)
-                                        const movePercent = ((moveSize / totalSize) * 100).toFixed(1)
-                                        const remainPercent = ((remainSize / totalSize) * 100).toFixed(1)
+                                        // 与当前卷容量对比：优先用 volume_total_bytes，无卷信息时回退到扫描总大小
+                                        const volumeCapacity = (result?.volume_total_bytes != null && result.volume_total_bytes > 0)
+                                            ? result.volume_total_bytes
+                                            : (result?.total_size || 1)
+                                        const remainSize = Math.max(0, volumeCapacity - deleteSize - moveSize)
+                                        // 删除/迁移/保留占比 = 各自容量 / 卷容量，展示时上限 100%
+                                        const deletePercent = Math.min(100, (deleteSize / volumeCapacity) * 100).toFixed(1)
+                                        const movePercent = Math.min(100, (moveSize / volumeCapacity) * 100).toFixed(1)
+                                        const remainPercent = Math.min(100, (remainSize / volumeCapacity) * 100).toFixed(1)
 
                                         // 检测是否为暗色模式
                                         const isDarkMode = document.documentElement.classList.contains('dark')
@@ -1414,7 +1470,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                     {analysisResult.suggestions.length > 0 ? (
                                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 pr-2">
                                             {analysisResult.suggestions
-                                                .filter(s => !deletedPaths.has(s.path))
+                                                .filter(s => !deletedPaths.has(s.path) && !addedToSafeListPaths.has(s.path))
                                                 .filter(s => {
                                                     const actualAction = getActualAction(s.path, s.action)
                                                     return actionFilter === 'all' || actualAction === actionFilter
@@ -1437,6 +1493,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                                                             task={getTaskForPath(suggestion.path)}
                                                             onToggleAction={() => handleToggleAction(suggestion.path, actualAction)}
                                                             originalAction={suggestion.action}
+                                                            onAddToSafeList={handleAddToSafeListClick}
                                                         />
                                                     )
                                                 })}
@@ -1565,6 +1622,55 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
                         }}
                     >
                         {t('common.save')}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* 加入安全名单确认对话框 */}
+            <Dialog
+                open={safeListDialog.open}
+                onClose={() => setSafeListDialog({ open: false, path: null, dontRemind: false })}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{ sx: { borderRadius: '16px' } }}
+            >
+                <DialogTitle sx={{ pb: 1, pt: 2.5, px: 3 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Box sx={{ width: 36, height: 36, borderRadius: '10px', bgcolor: 'primary.main', color: 'primary.contrastText', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Shield size={20} />
+                        </Box>
+                        <Typography variant="h6" component="span" sx={{ fontSize: '16px', fontWeight: 700 }}>
+                            {t('safeList.confirmTitle')}
+                        </Typography>
+                    </Box>
+                </DialogTitle>
+                <DialogContent sx={{ px: 3 }}>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                        {t('safeList.confirmMessage')}
+                    </Typography>
+                    {safeListDialog.path && (
+                        <Typography variant="caption" component="div" sx={{ color: 'text.secondary', fontFamily: 'monospace', wordBreak: 'break-all', bgcolor: 'action.hover', p: 1.5, borderRadius: 1 }}>
+                            {safeListDialog.path}
+                        </Typography>
+                    )}
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                checked={safeListDialog.dontRemind}
+                                onChange={(_, checked) => setSafeListDialog(prev => ({ ...prev, dontRemind: checked }))}
+                                size="small"
+                            />
+                        }
+                        label={t('safeList.dontRemindAgain')}
+                        sx={{ mt: 2 }}
+                    />
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2.5 }}>
+                    <Button onClick={() => setSafeListDialog({ open: false, path: null, dontRemind: false })} sx={{ borderRadius: '10px', textTransform: 'none' }}>
+                        {t('common.cancel')}
+                    </Button>
+                    <Button onClick={handleSafeListConfirm} variant="contained" sx={{ borderRadius: '10px', textTransform: 'none' }}>
+                        {t('common.confirm')}
                     </Button>
                 </DialogActions>
             </Dialog>

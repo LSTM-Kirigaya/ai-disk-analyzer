@@ -7,3 +7,4 @@ pub mod delete;
 pub mod storage;
 pub mod oauth;
 pub mod cloud_upload;
+pub mod open_in_file_manager;
