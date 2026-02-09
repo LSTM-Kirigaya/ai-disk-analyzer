@@ -267,7 +267,12 @@
     "testConnectionSuccess": "大模型连接成功",
     "testConnectionFailed": "大模型连接失败",
     "useMftScan": "使用 MFT 加速扫描磁盘根路径",
-    "useMftScanHint": "勾选后，当扫描 C 盘、D 盘等磁盘根路径时使用 NTFS MFT 技术加速（仅 Windows 有效）"
+    "useMftScanHint": "勾选后，当扫描 C 盘、D 盘等磁盘根路径时使用 NTFS MFT 技术加速（仅 Windows 有效）",
+    "saveAsPreset": "保存为 API 地址选项",
+    "saveAsPresetHint": "将当前填写的 API 地址保存为一个选项，下次可直接从下拉列表中选择。建议先测试连接成功后再保存。",
+    "presetNamePlaceholder": "输入预设名称，如：我的 DeepSeek",
+    "saveAsPresetSuccess": "已保存为 API 地址选项",
+    "customApiPreset": "自定义服务"
   },
   "errors": {
     "noValidConfig": "未找到有效的云存储配置",

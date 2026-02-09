@@ -74,30 +74,31 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
     const [fileListSummary, setFileListSummary] = useState('')
     const [instruction, setInstruction] = useState(DEFAULT_PROMPT_INSTRUCTION)
     const [copied, setCopied] = useState(false)
-    // 文件数量滑块值，默认100，范围10到扫描到的文件数量
-    const maxFileCount = Math.max(10, result.file_count)
-    const [fileCount, setFileCount] = useState(() => Math.min(100, maxFileCount))
+    // 文件数量滑块值，与设置中的「Prompt 文件数量」完全共用同一配置，范围 20–2000（与设置对话框一致）
+    const PROMPT_FILE_COUNT_MIN = 20
+    const PROMPT_FILE_COUNT_MAX = 2000
+    const [fileCount, setFileCount] = useState(100)
 
-    // 加载保存的表格行数（与设置中的「Prompt 文件数量」共用，存于 app-settings.json）
+    // 加载保存的表格行数（与设置中的「Prompt 文件数量」共用 app-settings.json，范围 20–2000）
     useEffect(() => {
         let cancelled = false
         loadAppSettings().then(s => {
             if (!cancelled) {
-                const count = Math.min(maxFileCount, Math.max(10, s.promptFileCount))
+                const count = Math.min(PROMPT_FILE_COUNT_MAX, Math.max(PROMPT_FILE_COUNT_MIN, s.promptFileCount))
                 setFileCount(count)
             }
         })
         return () => {
             cancelled = true
         }
-    }, [maxFileCount])
+    }, [])
 
-    // 表格行数变化时保存到应用设置（本地持久化，普通模式发给 AI 的 prompt 也会用该值）
+    // 表格行数变化时保存到应用设置（与设置对话框完全同步）
     useEffect(() => {
-        if (fileCount >= 10 && fileCount <= maxFileCount) {
+        if (fileCount >= PROMPT_FILE_COUNT_MIN && fileCount <= PROMPT_FILE_COUNT_MAX) {
             loadAppSettings().then(s => void saveAppSettings({ ...s, promptFileCount: fileCount }))
         }
-    }, [fileCount, maxFileCount])
+    }, [fileCount])
 
     // 当 result 或 fileCount 改变时，重新生成摘要
     useEffect(() => {
@@ -182,12 +183,12 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                             onChange={(e) => {
                                 const raw = e.target.value.replace(/\D/g, '')
                                 if (raw === '') {
-                                    setFileCount(10)
+                                    setFileCount(PROMPT_FILE_COUNT_MIN)
                                     return
                                 }
                                 const v = parseInt(raw, 10)
                                 if (!isNaN(v)) {
-                                    const clamped = Math.min(maxFileCount, Math.max(10, v))
+                                    const clamped = Math.min(PROMPT_FILE_COUNT_MAX, Math.max(PROMPT_FILE_COUNT_MIN, v))
                                     setFileCount(clamped)
                                 }
                             }}
@@ -202,10 +203,10 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                         />
                     </Box>
                     <Slider
-                        min={10}
-                        max={maxFileCount}
-                        step={1}
-                        value={fileCount}
+                        min={PROMPT_FILE_COUNT_MIN}
+                        max={PROMPT_FILE_COUNT_MAX}
+                        step={10}
+                        value={Math.min(PROMPT_FILE_COUNT_MAX, Math.max(PROMPT_FILE_COUNT_MIN, fileCount))}
                         onChange={(_, value) => setFileCount(value as number)}
                         sx={{ 
                             color: 'primary.main',
@@ -222,8 +223,10 @@ function AIPromptPanel({ result }: { result: ScanResult }) {
                             },
                         }}
                         marks={[
-                            { value: 10, label: '10' },
-                            ...(maxFileCount > 10 ? [{ value: maxFileCount, label: maxFileCount.toString() }] : []),
+                            { value: PROMPT_FILE_COUNT_MIN, label: '20' },
+                            { value: 500, label: '500' },
+                            { value: 1000, label: '1000' },
+                            { value: PROMPT_FILE_COUNT_MAX, label: '2000' },
                         ]}
                     />
                     <FormHelperText sx={{ fontSize: '10px', m: 0, mt: 0.5, color: 'text.secondary' }}>

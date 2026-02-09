@@ -93,40 +93,64 @@ export const API_URL_PRESETS = [
   { id: 'custom', label: '自定义', value: 'custom' },
 ]
 
-/** 根据 apiUrl 得到预设 id，用于读写 providerApiKeys */
-export function getPresetId(apiUrl: string): string {
+/** 用户保存的自定义 API 地址预设（与 API_URL_PRESETS 结构一致） */
+export interface CustomApiPresetItem {
+  id: string
+  label: string
+  value: string
+}
+
+/** 根据 apiUrl 得到预设 id，用于读写 providerApiKeys；支持内置预设与用户自定义预设 */
+export function getPresetId(apiUrl: string, customPresets: CustomApiPresetItem[] = []): string {
   if (!apiUrl || apiUrl.trim() === '') return 'custom'
-  const preset = API_URL_PRESETS.find(p => p.value !== 'custom' && p.value === apiUrl.trim())
+  const trimmed = apiUrl.trim()
+  const custom = customPresets.find(p => p.value === trimmed)
+  if (custom) return custom.id
+  const preset = API_URL_PRESETS.find(p => p.value !== 'custom' && p.value === trimmed)
   return preset ? preset.id : 'custom'
 }
 
 const SETTINGS_FILE = 'settings.json'
 const SYSTEM_PROMPT_FILE = 'system-prompt.txt'
 
+type StoredSettings = AISettings & {
+  providerApiKeys?: Record<string, string>
+  customApiPresets?: CustomApiPresetItem[]
+}
+
 // 加载设置（从 providerApiKeys 解析出当前 apiUrl 对应的 apiKey；兼容旧配置）
-export async function loadSettings(): Promise<AISettings> {
-  const raw = await readJSON<AISettings & { providerApiKeys?: Record<string, string> }>(SETTINGS_FILE, DEFAULT_SETTINGS)
+export async function loadSettings(): Promise<AISettings & { customApiPresets: CustomApiPresetItem[] }> {
+  const raw = await readJSON<StoredSettings>(SETTINGS_FILE, DEFAULT_SETTINGS as StoredSettings)
+  const customApiPresets = raw.customApiPresets ?? []
   let providerApiKeys = raw.providerApiKeys ?? {}
 
   // 兼容旧数据：若没有 providerApiKeys 但有 apiKey，按当前 apiUrl 写入对应预设
   if (Object.keys(providerApiKeys).length === 0 && (raw.apiKey ?? '').trim() !== '') {
-    const presetId = getPresetId(raw.apiUrl)
+    const presetId = getPresetId(raw.apiUrl, customApiPresets)
     providerApiKeys = { [presetId]: raw.apiKey }
   }
 
-  const presetId = getPresetId(raw.apiUrl)
+  const presetId = getPresetId(raw.apiUrl, customApiPresets)
   const apiKey = providerApiKeys[presetId] ?? ''
 
   return {
     ...raw,
     providerApiKeys,
     apiKey,
+    customApiPresets,
   }
 }
 
-// 保存设置
+// 保存设置（会保留文件中已有的 customApiPresets）
 export async function saveSettings(settings: AISettings): Promise<void> {
-  await writeJSON(SETTINGS_FILE, settings)
+  const raw = await readJSON<StoredSettings>(SETTINGS_FILE, DEFAULT_SETTINGS as StoredSettings)
+  await writeJSON(SETTINGS_FILE, { ...raw, ...settings, customApiPresets: raw.customApiPresets ?? [] })
+}
+
+/** 保存用户自定义 API 地址预设列表（写入 settings 文件中的 customApiPresets 字段） */
+export async function saveCustomApiPresets(presets: CustomApiPresetItem[]): Promise<void> {
+  const raw = await readJSON<StoredSettings>(SETTINGS_FILE, DEFAULT_SETTINGS as StoredSettings)
+  await writeJSON(SETTINGS_FILE, { ...raw, customApiPresets: presets })
 }
 
 // 加载系统提示词

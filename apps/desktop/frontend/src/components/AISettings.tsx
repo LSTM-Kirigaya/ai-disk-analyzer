@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud, Settings, Wifi, Shield, Trash2 } from 'lucide-react'
+import { X, Eye, EyeOff, Check, AlertCircle, ChevronDown, ChevronUp, Brain, Cloud, Settings, Wifi, Shield, Trash2, BookmarkPlus } from 'lucide-react'
 import { showNotification } from '../services/notification'
 import {
   TextField,
@@ -29,10 +29,12 @@ import {
   List,
   ListItem,
   ListItemText,
+  useTheme,
 } from '@mui/material'
 import {
   loadSettings,
   saveSettings,
+  saveCustomApiPresets,
   DEFAULT_SETTINGS,
   MODEL_PRESETS,
   API_URL_PRESETS,
@@ -41,6 +43,7 @@ import {
   testConnection,
   type AISettings as AISettingsType,
   type ModelInfo,
+  type CustomApiPresetItem,
 } from '../services/ai'
 import { loadAppSettings, saveAppSettings, type AppSettings } from '../services/settings'
 import { CloudStorageSettings } from './CloudStorageSettings'
@@ -74,7 +77,7 @@ function TabPanel(props: TabPanelProps) {
       id={`settings-tabpanel-${index}`}
       aria-labelledby={`settings-tab-${index}`}
       {...other}
-      style={{ height: '100%', overflow: 'auto' }}
+      style={{ height: '100%', minHeight: 0, overflow: 'auto' }}
     >
       {value === index && (
         <Box sx={{ p: 2.5 }}>
@@ -89,6 +92,7 @@ const THEME_STORAGE_FILE = 'theme.txt'
 
 export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: externalThemePreference, onThemeChange, currentLanguage: externalCurrentLanguage, onLanguageChange }: Props) {
   const { t, i18n } = useTranslation()
+  const theme = useTheme()
   const [settings, setSettings] = useState<AISettingsType>(DEFAULT_SETTINGS)
   const [appSettings, setAppSettings] = useState<AppSettings>({ promptFileCount: 100, useMftScan: true })
   const [showApiKey, setShowApiKey] = useState(false)
@@ -100,8 +104,12 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
   const [testingConnection, setTestingConnection] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
+  const [modelSelectOpen, setModelSelectOpen] = useState(false)
   const [activeTab, setActiveTab] = useState(initialTab)
   const [showSafeListDialog, setShowSafeListDialog] = useState(false)
+  const [customApiPresets, setCustomApiPresets] = useState<CustomApiPresetItem[]>([])
+  const [showSavePresetDialog, setShowSavePresetDialog] = useState(false)
+  const [savePresetName, setSavePresetName] = useState('')
   const [safeListPaths, setSafeListPaths] = useState<string[]>([])
   const [newSafeListPath, setNewSafeListPath] = useState('')
   
@@ -140,13 +148,13 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
   useEffect(() => {
     loadSettings().then(loaded => {
       setSettings(loaded)
-      
+      setCustomApiPresets(loaded.customApiPresets ?? [])
       // 检查是否是自定义 URL
       const urlPreset = API_URL_PRESETS.find(p => p.value === loaded.apiUrl)
-      if (!urlPreset) {
+      const customPreset = (loaded.customApiPresets ?? []).find(p => p.value === loaded.apiUrl)
+      if (!urlPreset && !customPreset) {
         setCustomUrl(loaded.apiUrl)
       }
-      
       // 检查是否是自定义模型
       const modelPreset = MODEL_PRESETS.find(p => p.value === loaded.model)
       if (!modelPreset) {
@@ -161,7 +169,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
 
   // 当当前厂商的 API Key 和 URL 都填写后，自动获取模型列表；加载完成后默认选中第一个模型
   useEffect(() => {
-    const keyForUrl = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? ''
+    const keyForUrl = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl, customApiPresets)] ?? ''
     const loadModels = async () => {
       if (keyForUrl && settings.apiUrl) {
         setLoadingModels(true)
@@ -189,12 +197,23 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
     return () => clearTimeout(timer)
   }, [settings.apiUrl, settings.providerApiKeys])
 
+  // 当已有可用模型列表但当前选中不在列表中时，默认选第一个（避免 UI 显示空白）
+  // 排除用户主动选「自定义」的情况：model 为 '' 或 'custom' 时不覆盖
+  useEffect(() => {
+    if (availableModels.length === 0 || settings.model === 'custom' || settings.model === '') return
+    const inList = availableModels.some((m) => m.id === settings.model)
+    if (!inList) {
+      const sorted = [...availableModels].sort((a, b) => a.id.localeCompare(b.id))
+      setSettings((s) => ({ ...s, model: sorted[0].id }))
+    }
+  }, [availableModels, settings.model])
+
   const handleSave = async () => {
     try {
       // 保存时带上按厂商解析后的 apiKey（供 loadSettings 之外使用）及 providerApiKeys
       await saveSettings({
         ...settings,
-        apiKey: (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? '',
+        apiKey: (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl, customApiPresets)] ?? '',
       })
       await saveAppSettings(appSettings)
       setSaved(true)
@@ -228,11 +247,16 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
     }
   }
 
-  const isCustomUrl = !API_URL_PRESETS.some(p => p.value === settings.apiUrl && p.value !== 'custom')
-  const isCustomModel = !MODEL_PRESETS.some(p => p.value === settings.model && p.value !== 'custom')
+  const allApiPresets = [...API_URL_PRESETS.filter(p => p.value !== 'custom'), ...customApiPresets, { id: 'custom', label: t('common.custom'), value: 'custom' }]
+  const isCustomUrl = !allApiPresets.some(p => p.value !== 'custom' && p.value === settings.apiUrl)
+  // 有 API 拉取的模型列表时：仅当当前 model 不在该列表中才视为「自定义」；否则用静态预设判断（避免 reasoner 等被误判为自定义）
+  const isCustomModel =
+    availableModels.length > 0
+      ? !availableModels.some((m) => m.id === settings.model)
+      : !MODEL_PRESETS.some((p) => p.value === settings.model && p.value !== 'custom')
 
   // 当前选中的厂商对应的 API Key（独立存储，切换厂商显示各自的 key）
-  const currentApiKey = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl)] ?? ''
+  const currentApiKey = (settings.providerApiKeys ?? {})[getPresetId(settings.apiUrl, customApiPresets)] ?? ''
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center rounded-[12px] z-50">
@@ -303,8 +327,8 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
           </Tabs>
         </Box>
 
-        {/* 内容区 */}
-        <div className="flex-1 overflow-hidden bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+        {/* 内容区：min-h-0 让 flex 子项可收缩，内部 TabPanel 才能正常滚动 */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
           {/* AI 模型设置 Tab */}
           <TabPanel value={activeTab} index={0}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -318,8 +342,19 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                     value={isCustomUrl ? 'custom' : settings.apiUrl}
                     onChange={(e) => handleUrlChange(e.target.value)}
                     sx={{ fontSize: '14px' }}
+                    MenuProps={{
+                      disablePortal: false,
+                      sx: { zIndex: 9999 },
+                      PaperProps: {
+                        sx: {
+                          zIndex: 9999,
+                          maxHeight: 320,
+                          mt: 1,
+                        },
+                      },
+                    }}
                   >
-                    {API_URL_PRESETS.map((preset) => (
+                    {allApiPresets.map((preset) => (
                       <MenuItem key={preset.value} value={preset.value}>
                         {preset.label}
                       </MenuItem>
@@ -327,14 +362,30 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                   </Select>
                 </FormControl>
                 {isCustomUrl && (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={settings.apiUrl}
-                    onChange={(e) => setSettings(s => ({ ...s, apiUrl: e.target.value }))}
-                    placeholder={t('settings.inputCustomApiUrl')}
-                    sx={{ fontSize: '14px' }}
-                  />
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      value={settings.apiUrl}
+                      onChange={(e) => setSettings(s => ({ ...s, apiUrl: e.target.value }))}
+                      placeholder={t('settings.inputCustomApiUrl')}
+                      sx={{ fontSize: '14px' }}
+                    />
+                    {settings.apiUrl.trim() !== '' && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<BookmarkPlus size={16} />}
+                        onClick={() => {
+                          setSavePresetName('')
+                          setShowSavePresetDialog(true)
+                        }}
+                        sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                      >
+                        {t('settings.saveAsPreset')}
+                      </Button>
+                    )}
+                  </Box>
                 )}
               </Box>
 
@@ -350,7 +401,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                   value={currentApiKey}
                   onChange={(e) => setSettings(s => ({
                     ...s,
-                    providerApiKeys: { ...(s.providerApiKeys ?? {}), [getPresetId(s.apiUrl)]: e.target.value },
+                    providerApiKeys: { ...(s.providerApiKeys ?? {}), [getPresetId(s.apiUrl, customApiPresets)]: e.target.value },
                   }))}
                   placeholder={t('settings.inputApiKey')}
                   InputProps={{
@@ -433,25 +484,84 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                     <FormControl fullWidth size="small">
                       <Select
                         value={isCustomModel ? 'custom' : settings.model}
+                        open={modelSelectOpen}
+                        onOpen={() => setModelSelectOpen(true)}
+                        onClose={() => setModelSelectOpen(false)}
                         onChange={(e) => handleModelChange(e.target.value)}
                         sx={{ fontSize: '14px' }}
+                        renderValue={(selected) => {
+                          if (selected == null || selected === '') return ''
+                          if (selected === 'custom') return t('common.custom')
+                          return String(selected)
+                        }}
+                        MenuProps={{
+                          disablePortal: false,
+                          disableScrollLock: true,
+                          sx: { zIndex: 9999 },
+                          PaperProps: {
+                            sx: {
+                              zIndex: 9999,
+                              minHeight: 120,
+                              maxHeight: 320,
+                              mt: 1,
+                              bgcolor: theme.palette.background.paper,
+                              color: theme.palette.text.primary,
+                              '& .MuiMenuItem-root': {
+                                color: theme.palette.text.primary,
+                              },
+                              '& .MuiList-root': {
+                                py: 0,
+                              },
+                            },
+                          },
+                          MenuListProps: {
+                            sx: {
+                              py: 0,
+                              color: theme.palette.text.primary,
+                            },
+                          },
+                        }}
                       >
-                        {/* 显示从 API 获取的模型 */}
+                        {/* 显示从 API 获取的模型：用 onClick 显式处理点击，避免 portaled 菜单在部分环境下无响应 */}
                         {availableModels.length > 0 ? (
                           <>
                             {availableModels
                               .sort((a, b) => a.id.localeCompare(b.id))
                               .map((model) => (
-                                <MenuItem key={model.id} value={model.id}>
+                                <MenuItem
+                                  key={model.id}
+                                  value={model.id}
+                                  sx={{ fontSize: '14px' }}
+                                  onClick={() => {
+                                    handleModelChange(model.id)
+                                    setModelSelectOpen(false)
+                                  }}
+                                >
                                   {model.id}
                                 </MenuItem>
                               ))}
-                            <MenuItem value="custom">{t('common.custom')}</MenuItem>
+                            <MenuItem
+                              value="custom"
+                              sx={{ fontSize: '14px' }}
+                              onClick={() => {
+                                handleModelChange('custom')
+                                setModelSelectOpen(false)
+                              }}
+                            >
+                              {t('common.custom')}
+                            </MenuItem>
                           </>
                         ) : (
-                          // 如果没有获取到模型，显示预设模型（已包含「自定义」项，不再重复添加）
                           MODEL_PRESETS.map((preset) => (
-                            <MenuItem key={preset.value} value={preset.value}>
+                            <MenuItem
+                              key={preset.value}
+                              value={preset.value}
+                              sx={{ fontSize: '14px' }}
+                              onClick={() => {
+                                handleModelChange(preset.value)
+                                setModelSelectOpen(false)
+                              }}
+                            >
                               {preset.provider ? `${preset.label} (${preset.provider})` : preset.label}
                             </MenuItem>
                           ))
@@ -542,7 +652,7 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                       </FormHelperText>
                     </Box>
 
-                    {/* Prompt File Count */}
+                    {/* Prompt File Count（与开发者模式表格行数共用同一配置，范围 20–2000） */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="body2" sx={{ color: 'text.primary' }}>{t('settings.promptFileCount')}</Typography>
@@ -552,15 +662,16 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
                       </Box>
                       <Slider
                         min={20}
-                        max={200}
+                        max={2000}
                         step={10}
-                        value={appSettings.promptFileCount}
+                        value={Math.min(2000, Math.max(20, appSettings.promptFileCount))}
                         onChange={(_, value) => setAppSettings(s => ({ ...s, promptFileCount: value as number }))}
                         sx={{ color: 'primary.main' }}
                         marks={[
                           { value: 20, label: '20' },
-                          { value: 100, label: '100' },
-                          { value: 200, label: '200' },
+                          { value: 500, label: '500' },
+                          { value: 1000, label: '1000' },
+                          { value: 2000, label: '2000' },
                         ]}
                       />
                       <FormHelperText sx={{ fontSize: '10px', m: 0 }}>
@@ -682,6 +793,87 @@ export function AISettings({ onClose, initialTab = 0, onSaved, themePreference: 
             </Box>
           </TabPanel>
         </div>
+
+        {/* 保存为 API 地址预设对话框 */}
+        <Dialog
+          open={showSavePresetDialog}
+          onClose={() => setShowSavePresetDialog(false)}
+          maxWidth="xs"
+          fullWidth
+          PaperProps={{ sx: { borderRadius: '16px' } }}
+        >
+          <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <BookmarkPlus size={20} />
+            {t('settings.saveAsPreset')}
+          </DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              {t('settings.saveAsPresetHint')}
+            </Typography>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder={t('settings.presetNamePlaceholder')}
+              value={savePresetName}
+              onChange={(e) => setSavePresetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const name = savePresetName.trim() || settings.apiUrl.replace(/^https?:\/\//, '').split('/')[0] || t('settings.customApiPreset')
+                  if (name) {
+                    const newId = `custom-${Date.now()}`
+                    const newPreset: CustomApiPresetItem = { id: newId, label: name, value: settings.apiUrl.trim() }
+                    const newList = [...customApiPresets, newPreset]
+                    saveCustomApiPresets(newList).then(() => {
+                      setCustomApiPresets(newList)
+                      setSettings(s => ({
+                        ...s,
+                        apiUrl: newPreset.value,
+                        providerApiKeys: { ...(s.providerApiKeys ?? {}), [newId]: currentApiKey },
+                      }))
+                      setCustomUrl('')
+                      setShowSavePresetDialog(false)
+                      showNotification(t('settings.saveAsPresetSuccess'), name)
+                    }).catch(err => showNotification(t('settings.saveFailed'), String(err)))
+                  }
+                }
+              }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '10px' } }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setShowSavePresetDialog(false)} sx={{ borderRadius: '10px', textTransform: 'none' }}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="contained"
+              onClick={async () => {
+                const name = savePresetName.trim() || settings.apiUrl.replace(/^https?:\/\//, '').split('/')[0] || t('settings.customApiPreset')
+                if (!name) return
+                const newId = `custom-${Date.now()}`
+                const newPreset: CustomApiPresetItem = { id: newId, label: name, value: settings.apiUrl.trim() }
+                const newList = [...customApiPresets, newPreset]
+                try {
+                  await saveCustomApiPresets(newList)
+                  setCustomApiPresets(newList)
+                  setSettings(s => ({
+                    ...s,
+                    apiUrl: newPreset.value,
+                    providerApiKeys: { ...(s.providerApiKeys ?? {}), [newId]: currentApiKey },
+                  }))
+                  setCustomUrl('')
+                  setShowSavePresetDialog(false)
+                  showNotification(t('settings.saveAsPresetSuccess'), name)
+                } catch (err) {
+                  showNotification(t('settings.saveFailed'), String(err))
+                }
+              }}
+              sx={{ borderRadius: '10px', textTransform: 'none' }}
+            >
+              {t('common.confirm')}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* 安全名单管理对话框 */}
         <Dialog

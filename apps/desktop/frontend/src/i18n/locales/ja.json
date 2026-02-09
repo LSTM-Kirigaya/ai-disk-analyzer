@@ -268,7 +268,12 @@
     "testConnectionSuccess": "大規模言語モデル接続成功",
     "testConnectionFailed": "大規模言語モデル接続失敗",
     "useMftScan": "ディスクルートでMFTでスキャン加速",
-    "useMftScanHint": "有効時、WindowsでC:\\、D:\\などのボリュームルートをNTFS MFTでスキャン"
+    "useMftScanHint": "有効時、WindowsでC:\\、D:\\などのボリュームルートをNTFS MFTでスキャン",
+    "saveAsPreset": "API URLをプリセットに保存",
+    "saveAsPresetHint": "現在のAPI URLをプリセットとして保存し、次回からドロップダウンで選択できます。接続テスト後に保存することをおすすめします。",
+    "presetNamePlaceholder": "プリセット名を入力（例：My DeepSeek）",
+    "saveAsPresetSuccess": "API URLプリセットとして保存しました",
+    "customApiPreset": "カスタムサービス"
   },
   "errors": {
     "noValidConfig": "有効なクラウドストレージ設定が見つかりません",
