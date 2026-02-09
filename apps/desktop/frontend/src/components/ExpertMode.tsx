@@ -50,12 +50,6 @@ function normalizeScanPath(p: string): string {
   return s
 }
 
-/** 当前路径是否为 Windows 磁盘根（如 C:\），用于提示是否将走 MFT */
-function isWindowsVolumeRoot(p: string): boolean {
-  const s = p.trim().replace(/\//g, '\\')
-  const normalized = /^[A-Za-z]:$/.test(s) ? s + '\\' : s
-  return /^[A-Za-z]:\\$/.test(normalized)
-}
 const DEFAULT_PROMPT_INSTRUCTION = '请根据以上占用，简要指出可安全清理或迁移的大项，并给出操作建议。'
 const SKIP_SAFELIST_CONFIRM_KEY = 'skip-add-to-safelist-confirm'
 
@@ -360,7 +354,7 @@ export function ExpertMode({ onOpenSettings, loadedSnapshot, onSnapshotLoaded, s
     const [isAdmin, setIsAdmin] = useState<boolean | null>(false)
     const [hoverNode, setHoverNode] = useState<TreemapNode | null>(null)
     const [progressFiles, setProgressFiles] = useState(0)
-    const [progressMessage, setProgressMessage] = useState('')
+    const [_progressMessage, setProgressMessage] = useState('')
     const [viewMode, setViewMode] = useState<'disk' | 'ai-prompt'>('disk')
     const [shallowDirs, setShallowDirs] = useState(true)
     const openedSettingsForStandardRef = useRef(false)
