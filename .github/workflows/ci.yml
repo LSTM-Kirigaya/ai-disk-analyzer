@@ -16,8 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Stub ntfs-reader for Linux
+        run: |
+          mkdir -p crates/ntfs-reader/src
+          echo '[package]
+          name = "ntfs-reader"
+          version = "0.1.0"
+          edition = "2021"' > crates/ntfs-reader/Cargo.toml
+          echo '// stub for Linux CI' > crates/ntfs-reader/src/lib.rs
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,6 +48,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stub ntfs-reader for Linux
+        run: |
+          mkdir -p crates/ntfs-reader/src
+          echo '[package]
+          name = "ntfs-reader"
+          version = "0.1.0"
+          edition = "2021"' > crates/ntfs-reader/Cargo.toml
+          echo '// stub for Linux CI' > crates/ntfs-reader/src/lib.rs
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -54,6 +70,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Stub ntfs-reader for Linux
+        run: |
+          mkdir -p crates/ntfs-reader/src
+          echo '[package]
+          name = "ntfs-reader"
+          version = "0.1.0"
+          edition = "2021"' > crates/ntfs-reader/Cargo.toml
+          echo '// stub for Linux CI' > crates/ntfs-reader/src/lib.rs
 
       - name: Install cargo-audit
         run: cargo install cargo-audit
