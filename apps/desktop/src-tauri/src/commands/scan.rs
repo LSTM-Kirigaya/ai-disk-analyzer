@@ -49,7 +49,7 @@ pub async fn scan_path_command(
     }) as Box<dyn Fn(u64, &str) + Send + Sync>);
     let window_emit = window.clone();
     let (result, used_mft) = async_runtime::spawn_blocking(move || {
-        scan_path_with_progress(&path_clone, Some(progress), use_shallow, use_mft)
+        scan_path_with_progress(&path_clone, Some(&progress), use_shallow, use_mft)
     })
     .await
     .map_err(|e| e.to_string())?

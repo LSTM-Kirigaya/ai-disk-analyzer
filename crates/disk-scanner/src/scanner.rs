@@ -354,10 +354,9 @@ pub fn scan_will_use_mft(path: &str, use_mft: bool) -> bool {
 /// 执行磁盘扫描（支持进度回调；shallow_dirs 为 true 时对 node_modules/.git 等只计大小不递归）。
 /// 当 use_mft 为 true 且路径为 Windows 磁盘卷根（如 C:\）时，优先使用 MFT 加速扫描。
 /// 返回 `(ScanResult, used_mft)`，其中 `used_mft` 表示本次是否成功使用了 MFT。
-#[allow(clippy::needless_pass_by_value)]
 pub fn scan_path_with_progress(
     path: &str,
-    progress: Option<ProgressCbArc>,
+    progress: Option<&ProgressCbArc>,
     shallow_dirs: bool,
     use_mft: bool,
 ) -> Result<(ScanResult, bool), DiskAnalyzerError> {
@@ -383,7 +382,7 @@ pub fn scan_path_with_progress(
             "[scan] path is volume root, attempting MFT full scan: {}",
             path_buf.display()
         );
-        match crate::mft_scan::scan_volume_mft(path, progress.clone(), shallow_dirs) {
+        match crate::mft_scan::scan_volume_mft(path, progress.cloned(), shallow_dirs) {
             Ok(result) => return Ok((result, true)),
             Err(e) => {
                 let msg: String = e.to_string();
@@ -409,7 +408,7 @@ pub fn scan_path_with_progress(
         &name,
         0,
         &counter,
-        progress.as_deref(),
+        progress.map(std::sync::Arc::as_ref),
         shallow_dirs,
     )?;
     let scan_time_ms = start.elapsed().as_millis() as u64;
@@ -434,7 +433,7 @@ pub fn scan_path_with_progress(
 
 /// 执行磁盘扫描（无进度；默认开启 shallow_dirs；默认开启 MFT 加速卷根）
 pub fn scan_path(path: &str) -> Result<ScanResult, DiskAnalyzerError> {
-    scan_path_with_progress(path, None, true, true).map(|(r, _)| r)
+    scan_path_with_progress(path, None::<&ProgressCbArc>, true, true).map(|(r, _)| r)
 }
 
 #[cfg(test)]

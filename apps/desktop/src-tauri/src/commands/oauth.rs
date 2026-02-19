@@ -129,8 +129,7 @@ fn start_callback_server() -> Result<(tiny_http::Server, u16), String> {
 }
 
 // 等待 OAuth 回调
-#[allow(clippy::needless_pass_by_value)]
-fn wait_for_callback(server: tiny_http::Server) -> Result<(String, String), String> {
+fn wait_for_callback(server: &tiny_http::Server) -> Result<(String, String), String> {
     // 等待请求，超时 5 分钟
     let timeout = std::time::Duration::from_secs(300);
     let start = std::time::Instant::now();
@@ -522,7 +521,7 @@ pub async fn complete_google_oauth(
     println!("回调 URL: {}", redirect_uri);
     let (code, received_state) = tokio::task::spawn_blocking(move || {
         println!("回调服务器正在监听...");
-        let result = wait_for_callback(server);
+        let result = wait_for_callback(&server);
         println!("回调服务器收到响应: {:?}", result.is_ok());
         result
     })
@@ -770,7 +769,7 @@ pub async fn complete_baidu_oauth(
     println!("回调 URL: {}", redirect_uri);
     let (code, received_state) = tokio::task::spawn_blocking(move || {
         println!("回调服务器正在监听...");
-        let result = wait_for_callback(server);
+        let result = wait_for_callback(&server);
         println!("回调服务器收到响应: {:?}", result.is_ok());
         result
     })
@@ -967,7 +966,7 @@ pub async fn complete_aliyun_oauth(
     println!("回调 URL: {}", redirect_uri);
     let (code, received_state) = tokio::task::spawn_blocking(move || {
         println!("回调服务器正在监听...");
-        let result = wait_for_callback(server);
+        let result = wait_for_callback(&server);
         println!("回调服务器收到响应: {:?}", result.is_ok());
         result
     })
@@ -1158,7 +1157,7 @@ pub async fn complete_dropbox_oauth(
     println!("回调 URL: {}", redirect_uri);
     let (code, received_state) = tokio::task::spawn_blocking(move || {
         println!("回调服务器正在监听...");
-        let result = wait_for_callback(server);
+        let result = wait_for_callback(&server);
         println!("回调服务器收到响应: {:?}", result.is_ok());
         result
     })
